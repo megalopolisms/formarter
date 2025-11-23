@@ -11,19 +11,25 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QLabel,
+    QMenu,
+    QInputDialog,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QTextCursor
+from PyQt6.QtGui import QFont, QTextCursor, QAction
 
-from .models import Document, Paragraph
+from .models import Document, Paragraph, Section
 
 
 class MainWindow(QMainWindow):
     """
     Main application window with two-panel layout:
     - Left: Text editor (user types here, blank lines create paragraphs)
-    - Right: Paragraph tree (shows numbered paragraphs)
+    - Right: Paragraph tree (shows numbered paragraphs grouped by sections)
     """
+
+    # Roman numerals for section numbering
+    ROMAN_NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
+                      "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX"]
 
     def __init__(self):
         super().__init__()
@@ -35,6 +41,9 @@ class MainWindow(QMainWindow):
 
         # Track line positions for each paragraph (para_num -> line_index)
         self._para_line_map: dict[int, int] = {}
+
+        # Track which paragraph starts each section (para_num -> section)
+        self._section_starts: dict[int, Section] = {}
 
         # Flag to prevent recursive updates
         self._updating = False
@@ -78,8 +87,7 @@ class MainWindow(QMainWindow):
         self.text_editor.setPlaceholderText(
             "Type your document here...\n\n"
             "Press Enter to create a new paragraph.\n\n"
-            "Each paragraph will be automatically numbered.\n\n"
-            "Click a paragraph in the tree to highlight it."
+            "Right-click paragraphs in tree to assign sections."
         )
 
         # Connect text changed signal for real-time paragraph detection
@@ -109,6 +117,10 @@ class MainWindow(QMainWindow):
         font = QFont("Arial", 10)
         self.tree_widget.setFont(font)
 
+        # Enable right-click context menu
+        self.tree_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree_widget.customContextMenuRequested.connect(self._on_tree_context_menu)
+
         # Connect click signal to highlight paragraph in editor
         self.tree_widget.itemClicked.connect(self._on_tree_item_clicked)
 
@@ -133,8 +145,10 @@ class MainWindow(QMainWindow):
         text = self.text_editor.toPlainText()
 
         # Split by ANY newline - each line of content is a paragraph
-        # Empty lines are ignored (just visual spacing)
         lines = text.split("\n")
+
+        # Remember old section assignments before clearing
+        old_sections = dict(self._section_starts)
 
         # Clean up and filter empty lines
         self.document.paragraphs.clear()
@@ -142,89 +156,246 @@ class MainWindow(QMainWindow):
 
         para_num = 1
         for line_idx, line in enumerate(lines):
-            # Clean up the line
             cleaned = line.strip()
-
-            # Skip empty lines (they're just visual spacing)
             if not cleaned:
                 continue
 
-            # Create paragraph with continuous numbering
             para = Paragraph(
                 number=para_num,
                 text=cleaned,
-                section_id=""  # No section assigned yet
+                section_id=""
             )
             self.document.paragraphs[para_num] = para
-
-            # Track which line this paragraph is on
             self._para_line_map[para_num] = line_idx
-
             para_num += 1
 
+        # Re-apply section assignments (adjust for paragraph count changes)
+        new_section_starts = {}
+        for old_para_num, section in old_sections.items():
+            # Keep section if paragraph still exists
+            if old_para_num <= len(self.document.paragraphs):
+                new_section_starts[old_para_num] = section
+        self._section_starts = new_section_starts
+
     def _update_tree(self):
-        """Update the tree widget with current paragraphs."""
+        """Update the tree widget with current paragraphs grouped by sections."""
         self.tree_widget.clear()
 
-        # Update header with paragraph count
         count = len(self.document.paragraphs)
-        self.tree_header.setText(f"Paragraph Structure ({count} paragraph{'s' if count != 1 else ''})")
+        section_count = len(self._section_starts)
+        self.tree_header.setText(
+            f"Paragraph Structure ({count} paragraph{'s' if count != 1 else ''}, "
+            f"{section_count} section{'s' if section_count != 1 else ''})"
+        )
 
-        # Add each paragraph to the tree
-        for para_num in sorted(self.document.paragraphs.keys()):
+        if not self.document.paragraphs:
+            return
+
+        # Sort paragraph numbers
+        para_nums = sorted(self.document.paragraphs.keys())
+
+        # Find which paragraphs start sections
+        section_start_paras = sorted(self._section_starts.keys())
+
+        current_section_item = None
+        current_section_start = None
+
+        for para_num in para_nums:
             para = self.document.paragraphs[para_num]
 
-            # Format: "1. Preview text here..."
-            preview = para.get_display_text(55)
-            para_text = f"{para.number}. {preview}"
+            # Check if this paragraph starts a new section
+            if para_num in self._section_starts:
+                section = self._section_starts[para_num]
+                section_text = f"{section.id}. {section.title}"
 
+                current_section_item = QTreeWidgetItem([section_text])
+                current_section_item.setData(0, Qt.ItemDataRole.UserRole, ("section", para_num))
+
+                # Make section headers bold
+                font = current_section_item.font(0)
+                font.setBold(True)
+                current_section_item.setFont(0, font)
+
+                self.tree_widget.addTopLevelItem(current_section_item)
+                current_section_item.setExpanded(True)
+                current_section_start = para_num
+
+            # Create paragraph item
+            preview = para.get_display_text(50)
+            para_text = f"{para.number}. {preview}"
             para_item = QTreeWidgetItem([para_text])
-            # Store paragraph number in item data for click handling
-            para_item.setData(0, Qt.ItemDataRole.UserRole, para_num)
-            self.tree_widget.addTopLevelItem(para_item)
+            para_item.setData(0, Qt.ItemDataRole.UserRole, ("para", para_num))
+
+            # Add to section or top level
+            if current_section_item is not None:
+                current_section_item.addChild(para_item)
+            else:
+                self.tree_widget.addTopLevelItem(para_item)
+
+    def _on_tree_context_menu(self, position):
+        """Show context menu on right-click."""
+        item = self.tree_widget.itemAt(position)
+        if not item:
+            return
+
+        item_data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not item_data:
+            return
+
+        item_type, item_id = item_data
+
+        menu = QMenu(self)
+
+        if item_type == "para":
+            # Right-clicked on a paragraph
+            para_num = item_id
+
+            # Section submenu
+            section_menu = menu.addMenu("Section")
+
+            # Option to create new section
+            new_section_action = section_menu.addAction("Create new section...")
+            new_section_action.triggered.connect(lambda: self._create_section_at(para_num))
+
+            # List existing sections to assign to
+            if self._section_starts:
+                section_menu.addSeparator()
+                for start_para, section in sorted(self._section_starts.items()):
+                    action = section_menu.addAction(f"{section.id}. {section.title}")
+                    action.triggered.connect(
+                        lambda checked, s=section, p=para_num: self._assign_to_section(p, s)
+                    )
+
+            # Option to remove from section (if in a section)
+            if self._get_section_for_para(para_num):
+                section_menu.addSeparator()
+                remove_action = section_menu.addAction("Remove from section")
+                remove_action.triggered.connect(lambda: self._remove_from_section(para_num))
+
+        elif item_type == "section":
+            # Right-clicked on a section header
+            section_start_para = item_id
+
+            # Option to remove section
+            remove_action = menu.addAction("Remove section")
+            remove_action.triggered.connect(lambda: self._remove_section(section_start_para))
+
+            # Option to rename section
+            rename_action = menu.addAction("Rename section...")
+            rename_action.triggered.connect(lambda: self._rename_section(section_start_para))
+
+        menu.exec(self.tree_widget.viewport().mapToGlobal(position))
+
+    def _create_section_at(self, para_num: int):
+        """Create a new section starting at the given paragraph."""
+        # Ask for section name
+        name, ok = QInputDialog.getText(
+            self, "Create Section",
+            "Section name (e.g., PARTIES, JURISDICTION):"
+        )
+        if not ok or not name.strip():
+            return
+
+        name = name.strip().upper()
+
+        # Determine Roman numeral
+        existing_numerals = [s.id for s in self._section_starts.values()]
+        for numeral in self.ROMAN_NUMERALS:
+            if numeral not in existing_numerals:
+                break
+        else:
+            numeral = f"S{len(self._section_starts) + 1}"
+
+        # Create section
+        section = Section(id=numeral, title=name)
+        self._section_starts[para_num] = section
+
+        # Update tree
+        self._update_tree()
+
+    def _assign_to_section(self, para_num: int, section: Section):
+        """Move section to start at a different paragraph."""
+        # Find current start of this section
+        current_start = None
+        for start_para, s in self._section_starts.items():
+            if s.id == section.id:
+                current_start = start_para
+                break
+
+        if current_start is not None:
+            del self._section_starts[current_start]
+
+        self._section_starts[para_num] = section
+        self._update_tree()
+
+    def _remove_from_section(self, para_num: int):
+        """Remove section that starts at this paragraph."""
+        if para_num in self._section_starts:
+            del self._section_starts[para_num]
+            self._update_tree()
+
+    def _remove_section(self, section_start_para: int):
+        """Remove a section entirely."""
+        if section_start_para in self._section_starts:
+            del self._section_starts[section_start_para]
+            self._update_tree()
+
+    def _rename_section(self, section_start_para: int):
+        """Rename a section."""
+        if section_start_para not in self._section_starts:
+            return
+
+        section = self._section_starts[section_start_para]
+        name, ok = QInputDialog.getText(
+            self, "Rename Section",
+            "New section name:",
+            text=section.title
+        )
+        if ok and name.strip():
+            section.title = name.strip().upper()
+            self._update_tree()
+
+    def _get_section_for_para(self, para_num: int) -> Section | None:
+        """Get the section that contains a paragraph."""
+        # Find the most recent section start before or at para_num
+        relevant_starts = [p for p in self._section_starts.keys() if p <= para_num]
+        if not relevant_starts:
+            return None
+        return self._section_starts[max(relevant_starts)]
 
     def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
         """Handle click on tree item - highlight and scroll to paragraph in editor."""
-        # Get paragraph number from item data
-        para_num = item.data(0, Qt.ItemDataRole.UserRole)
-        if para_num is None:
+        item_data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not item_data:
             return
 
-        # Get the line index for this paragraph
+        item_type, item_id = item_data
+
+        # Only handle paragraph clicks, not section clicks
+        if item_type != "para":
+            return
+
+        para_num = item_id
         line_idx = self._para_line_map.get(para_num)
         if line_idx is None:
             return
 
-        # Get the text and find the line position
         text = self.text_editor.toPlainText()
         lines = text.split("\n")
 
         if line_idx >= len(lines):
             return
 
-        # Calculate character position for this line
-        char_pos = sum(len(lines[i]) + 1 for i in range(line_idx))  # +1 for newline
+        char_pos = sum(len(lines[i]) + 1 for i in range(line_idx))
         line_length = len(lines[line_idx])
 
-        # Prevent triggering text changed while selecting
         self._updating = True
         try:
-            # Create cursor and select the line
             cursor = self.text_editor.textCursor()
-
-            # Move to start of line
             cursor.setPosition(char_pos)
-
-            # Select the entire line
             cursor.setPosition(char_pos + line_length, QTextCursor.MoveMode.KeepAnchor)
-
-            # Apply selection to editor
             self.text_editor.setTextCursor(cursor)
-
-            # Ensure the line is visible
             self.text_editor.ensureCursorVisible()
-
-            # Focus the editor
             self.text_editor.setFocus()
         finally:
             self._updating = False
