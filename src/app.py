@@ -294,7 +294,7 @@ class MainWindow(QMainWindow):
                 self.section_tree.addTopLevelItem(para_item)
 
     def _update_page_tree(self):
-        """Update the page tree widget with paragraphs grouped by page."""
+        """Update the page tree widget with paragraphs grouped by page and section."""
         self.page_tree.clear()
 
         page_count = len(self._page_assignments)
@@ -317,15 +317,44 @@ class MainWindow(QMainWindow):
 
             self.page_tree.addTopLevelItem(page_item)
 
-            # Add paragraphs under this page
+            # Group paragraphs by section within this page
+            section_groups: dict[str, list[int]] = {}  # section_key -> [para_nums]
+
             for para_num in para_nums:
-                para = self.document.paragraphs.get(para_num)
-                if para:
-                    preview = para.get_display_text(40)
-                    para_text = f"{para.number}. {preview}"
-                    para_item = QTreeWidgetItem([para_text])
-                    para_item.setData(0, Qt.ItemDataRole.UserRole, ("para", para_num))
-                    page_item.addChild(para_item)
+                section = self._get_section_for_para(para_num)
+                if section:
+                    section_key = f"{section.id}. {section.title}"
+                else:
+                    section_key = "(No Section)"
+
+                if section_key not in section_groups:
+                    section_groups[section_key] = []
+                section_groups[section_key].append(para_num)
+
+            # Add sections and paragraphs under this page
+            for section_key, section_para_nums in section_groups.items():
+                # Create section item under page
+                section_item = QTreeWidgetItem([section_key])
+                section_item.setData(0, Qt.ItemDataRole.UserRole, ("page_section", section_key))
+
+                # Make section text italic
+                section_font = section_item.font(0)
+                section_font.setItalic(True)
+                section_item.setFont(0, section_font)
+
+                page_item.addChild(section_item)
+
+                # Add paragraphs under this section
+                for para_num in section_para_nums:
+                    para = self.document.paragraphs.get(para_num)
+                    if para:
+                        preview = para.get_display_text(40)
+                        para_text = f"{para.number}. {preview}"
+                        para_item = QTreeWidgetItem([para_text])
+                        para_item.setData(0, Qt.ItemDataRole.UserRole, ("para", para_num))
+                        section_item.addChild(para_item)
+
+                section_item.setExpanded(True)
 
             page_item.setExpanded(True)
 
