@@ -45,8 +45,10 @@ class MainWindow(QMainWindow):
                       "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX"]
 
     # Page formatting constants (federal court standard)
-    LINES_PER_PAGE = 25  # Approximate lines per page (double-spaced, 1" margins)
-    CHARS_PER_LINE = 65  # Approximate characters per line (Times New Roman 12pt, 1" margins)
+    # Based on: 11" page - 2" margins = 9" usable, 24pt line spacing = 27 lines
+    # But reportlab adds paragraph spacing, so ~22-24 short paragraphs fit per page
+    LINES_PER_PAGE = 54  # Single-spaced equivalent lines (27 double-spaced * 2)
+    CHARS_PER_LINE = 78  # ~6.5" width at 12 chars/inch for Times New Roman 12pt
 
     def __init__(self):
         super().__init__()
@@ -308,10 +310,10 @@ class MainWindow(QMainWindow):
         for para_num in sorted(self.document.paragraphs.keys()):
             para = self.document.paragraphs[para_num]
 
-            # Calculate lines this paragraph takes (double-spaced)
-            # Each paragraph = ceil(len(text) / CHARS_PER_LINE) lines * 2 (double-spaced) + 1 (spacing)
+            # Calculate lines this paragraph takes (matching PDF output)
+            # Each paragraph = ceil(len(text) / CHARS_PER_LINE) * 2 (double-spaced) + 1 (spacing after)
             text_lines = max(1, (len(para.text) + self.CHARS_PER_LINE - 1) // self.CHARS_PER_LINE)
-            para_lines = text_lines * 2 + 1  # Double-spaced + spacing between paragraphs
+            para_lines = text_lines * 2 + 1  # Double-spaced text + half-line spacing
 
             # Check if we need a new page
             if current_line_count + para_lines > self.LINES_PER_PAGE and current_line_count > 0:
