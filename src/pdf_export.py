@@ -122,7 +122,8 @@ def _add_page_number(canvas, doc):
 def generate_pdf(
     paragraphs: dict,
     section_starts: dict,
-    output_path: str | None = None
+    output_path: str | None = None,
+    global_spacing=None
 ) -> str:
     """
     Generate a PDF document with federal court formatting.
@@ -131,6 +132,7 @@ def generate_pdf(
         paragraphs: Dict of paragraph number -> Paragraph object
         section_starts: Dict of paragraph number -> Section object (where sections start)
         output_path: Optional path to save PDF. If None, creates temp file.
+        global_spacing: Global SpacingSettings object (optional)
 
     Returns:
         Path to the generated PDF file.
@@ -155,8 +157,20 @@ def generate_pdf(
         bottomMargin=MARGIN,
     )
 
+    # Default spacing values
+    default_before_section = 1
+    default_after_section = 1
+    default_between_paragraphs = 1
+
+    if global_spacing:
+        default_before_section = global_spacing.before_section
+        default_after_section = global_spacing.after_section
+        default_between_paragraphs = global_spacing.between_paragraphs
+
     # Build content
     story = []
+    current_section = None
+    is_first_para_in_section = False
 
     for para_num in sorted(paragraphs.keys()):
         para = paragraphs[para_num]
@@ -164,10 +178,28 @@ def generate_pdf(
         # Check if this paragraph starts a new section
         if para_num in section_starts:
             section = section_starts[para_num]
+            current_section = section
+
+            # Get spacing for this section (custom or global)
+            spacing = section.custom_spacing if section.custom_spacing else None
+            before_section = spacing.before_section if spacing else default_before_section
+            after_section = spacing.after_section if spacing else default_after_section
+
             section_text = f"<b>{section.id}. {section.title}</b>"
-            story.append(Spacer(1, LINE_SPACING))
+            story.append(Spacer(1, LINE_SPACING * before_section))
             story.append(Paragraph(section_text, styles['section']))
-            story.append(Spacer(1, LINE_SPACING / 2))
+            story.append(Spacer(1, LINE_SPACING * after_section / 2))
+            is_first_para_in_section = True
+        else:
+            # Add spacing between paragraphs (not before first para in section)
+            if story and not is_first_para_in_section:
+                # Get current section's spacing
+                spacing = current_section.custom_spacing if current_section and current_section.custom_spacing else None
+                between = spacing.between_paragraphs if spacing else default_between_paragraphs
+                if between > 0:
+                    story.append(Spacer(1, LINE_SPACING * between / 2))
+
+        is_first_para_in_section = False
 
         # Add numbered paragraph
         # Escape any HTML-like characters in the text

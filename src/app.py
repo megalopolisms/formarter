@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QFormLayout,
     QLabel,
     QMenu,
     QInputDialog,
@@ -24,11 +25,15 @@ from PyQt6.QtWidgets import (
     QDialog,
     QScrollArea,
     QMessageBox,
+    QSpinBox,
+    QGroupBox,
+    QCheckBox,
+    QDialogButtonBox,
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage
 
-from .models import Document, Paragraph, Section
+from .models import Document, Paragraph, Section, SpacingSettings
 from .pdf_export import generate_pdf
 
 
@@ -66,6 +71,9 @@ class MainWindow(QMainWindow):
 
         # Track page assignments (page_num -> list of para_nums)
         self._page_assignments: dict[int, list[int]] = {}
+
+        # Global spacing settings
+        self._global_spacing = SpacingSettings()
 
         # Flag to prevent recursive updates
         self._updating = False
@@ -150,6 +158,24 @@ class MainWindow(QMainWindow):
         """)
         export_btn.clicked.connect(self._on_export_clicked)
         layout.addWidget(export_btn)
+
+        # Options button
+        options_btn = QPushButton("Options")
+        options_btn.setStyleSheet("""
+            QPushButton {
+                background: #6c757d;
+                color: white;
+                border: none;
+                padding: 4px 12px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #5a6268;
+            }
+        """)
+        options_btn.clicked.connect(self._on_options_clicked)
+        layout.addWidget(options_btn)
 
         # Spacer
         layout.addStretch()
@@ -306,14 +332,29 @@ class MainWindow(QMainWindow):
         current_page = 1
         current_line_count = 0
         self._page_assignments[current_page] = []
+        current_section = None
 
         for para_num in sorted(self.document.paragraphs.keys()):
             para = self.document.paragraphs[para_num]
 
+            # Get spacing settings (section-specific or global)
+            section = self._get_section_for_para(para_num)
+            spacing = None
+            if section and section.custom_spacing:
+                spacing = section.custom_spacing
+            else:
+                spacing = self._global_spacing
+
             # Calculate lines this paragraph takes (matching PDF output)
-            # Each paragraph = ceil(len(text) / CHARS_PER_LINE) * 2 (double-spaced) + 1 (spacing after)
             text_lines = max(1, (len(para.text) + self.CHARS_PER_LINE - 1) // self.CHARS_PER_LINE)
-            para_lines = text_lines * 2 + 1  # Double-spaced text + half-line spacing
+            para_lines = text_lines * 2 + spacing.between_paragraphs  # Double-spaced + spacing
+
+            # Check if section header needs extra space
+            if para_num in self._section_starts:
+                section = self._section_starts[para_num]
+                current_section = section
+                section_spacing = section.custom_spacing or self._global_spacing
+                para_lines += section_spacing.before_section * 2 + section_spacing.after_section
 
             # Check if we need a new page
             if current_line_count + para_lines > self.LINES_PER_PAGE and current_line_count > 0:
@@ -324,10 +365,6 @@ class MainWindow(QMainWindow):
             # Add paragraph to current page
             self._page_assignments[current_page].append(para_num)
             current_line_count += para_lines
-
-            # Check if section header needs extra space
-            if para_num in self._section_starts:
-                current_line_count += 2  # Extra space for section header
 
     def _update_section_tree(self):
         """Update the section tree widget with current paragraphs grouped by sections."""
@@ -482,6 +519,9 @@ class MainWindow(QMainWindow):
             rename_action = menu.addAction("Rename section...")
             rename_action.triggered.connect(lambda: self._rename_section(section_start_para))
 
+            spacing_action = menu.addAction("Spacing...")
+            spacing_action.triggered.connect(lambda: self._edit_section_spacing(section_start_para))
+
         menu.exec(self.section_tree.viewport().mapToGlobal(position))
 
     def _create_section_at(self, para_num: int):
@@ -556,6 +596,25 @@ class MainWindow(QMainWindow):
             section.title = name.strip().upper()
             self._update_section_tree()
 
+    def _edit_section_spacing(self, section_start_para: int):
+        """Edit spacing settings for a specific section."""
+        if section_start_para not in self._section_starts:
+            return
+
+        section = self._section_starts[section_start_para]
+        current_spacing = section.custom_spacing or self._global_spacing
+
+        dialog = SpacingDialog(
+            current_spacing,
+            parent=self,
+            section_name=f"{section.id}. {section.title}"
+        )
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            section.custom_spacing = dialog.get_spacing()
+            self._calculate_pages()
+            self._update_page_tree()
+
     def _get_section_for_para(self, para_num: int) -> Section | None:
         """Get the section that contains a paragraph."""
         relevant_starts = [p for p in self._section_starts.keys() if p <= para_num]
@@ -624,7 +683,8 @@ class MainWindow(QMainWindow):
             # Generate PDF to temp file
             pdf_path = generate_pdf(
                 self.document.paragraphs,
-                self._section_starts
+                self._section_starts,
+                global_spacing=self._global_spacing
             )
 
             # Open in system PDF viewer (Preview.app on macOS)
@@ -672,7 +732,8 @@ class MainWindow(QMainWindow):
             generate_pdf(
                 self.document.paragraphs,
                 self._section_starts,
-                output_path=file_path
+                output_path=file_path,
+                global_spacing=self._global_spacing
             )
 
             # Show success and offer to open
@@ -697,3 +758,89 @@ class MainWindow(QMainWindow):
                 "Export Error",
                 f"Failed to export PDF:\n{str(e)}"
             )
+
+    def _on_options_clicked(self):
+        """Handle Options button click - show spacing settings dialog."""
+        dialog = SpacingDialog(self._global_spacing, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._global_spacing = dialog.get_spacing()
+            self._calculate_pages()
+            self._update_page_tree()
+
+
+class SpacingDialog(QDialog):
+    """Dialog for configuring global spacing settings."""
+
+    def __init__(self, current_spacing: SpacingSettings, parent=None, section_name: str = None):
+        super().__init__(parent)
+        self._section_name = section_name
+        self._is_section = section_name is not None
+
+        if self._is_section:
+            self.setWindowTitle(f"Spacing - {section_name}")
+        else:
+            self.setWindowTitle("Global Spacing Options")
+
+        self.setMinimumWidth(300)
+        self._setup_ui(current_spacing)
+
+    def _setup_ui(self, spacing: SpacingSettings):
+        layout = QVBoxLayout(self)
+
+        # Section override checkbox (only for per-section dialogs)
+        if self._is_section:
+            self.use_custom = QCheckBox("Use custom spacing for this section")
+            self.use_custom.setChecked(spacing is not None)
+            self.use_custom.toggled.connect(self._on_custom_toggled)
+            layout.addWidget(self.use_custom)
+
+        # Spacing group
+        group = QGroupBox("Line Spacing (0, 1, or 2 blank lines)")
+        form = QFormLayout(group)
+
+        # Before section header
+        self.before_section = QSpinBox()
+        self.before_section.setRange(0, 2)
+        self.before_section.setValue(spacing.before_section if spacing else 1)
+        form.addRow("Before section header:", self.before_section)
+
+        # After section header
+        self.after_section = QSpinBox()
+        self.after_section.setRange(0, 2)
+        self.after_section.setValue(spacing.after_section if spacing else 1)
+        form.addRow("After section header:", self.after_section)
+
+        # Between paragraphs
+        self.between_paragraphs = QSpinBox()
+        self.between_paragraphs.setRange(0, 2)
+        self.between_paragraphs.setValue(spacing.between_paragraphs if spacing else 1)
+        form.addRow("Between paragraphs:", self.between_paragraphs)
+
+        layout.addWidget(group)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        if self._is_section:
+            self._on_custom_toggled(self.use_custom.isChecked())
+
+    def _on_custom_toggled(self, checked: bool):
+        """Enable/disable spacing controls based on checkbox."""
+        self.before_section.setEnabled(checked)
+        self.after_section.setEnabled(checked)
+        self.between_paragraphs.setEnabled(checked)
+
+    def get_spacing(self) -> SpacingSettings | None:
+        """Get the configured spacing settings."""
+        if self._is_section and not self.use_custom.isChecked():
+            return None
+        return SpacingSettings(
+            before_section=self.before_section.value(),
+            after_section=self.after_section.value(),
+            between_paragraphs=self.between_paragraphs.value(),
+        )

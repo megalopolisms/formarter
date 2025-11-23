@@ -13,6 +13,17 @@ from typing import Optional
 
 
 @dataclass
+class SpacingSettings:
+    """
+    Spacing settings for document formatting.
+    Values represent number of blank lines (0, 1, or 2).
+    """
+    before_section: int = 1  # Lines before section header
+    after_section: int = 1   # Lines after section header (before first para)
+    between_paragraphs: int = 1  # Lines between paragraphs
+
+
+@dataclass
 class Paragraph:
     """
     A single numbered paragraph in the document.
@@ -57,6 +68,7 @@ class Section:
     title: str  # Section title (e.g., "PARTIES", "JURISDICTION")
     subitems: list[SubItem] = field(default_factory=list)
     paragraph_ids: list[int] = field(default_factory=list)  # Paragraphs directly in section (no sub-item)
+    custom_spacing: Optional[SpacingSettings] = None  # Per-section override (None = use global)
 
     def get_all_paragraph_ids(self) -> list[int]:
         """Get all paragraph IDs in this section, including sub-items."""
