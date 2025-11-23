@@ -9,16 +9,51 @@ Formarter is a Python GUI application designed for lawyers who file documents in
 - **Font:** Times New Roman, 12pt
 - **Spacing:** Double-spaced
 - **Margins:** 1 inch all sides (configurable)
-- **Paragraphs:** Numbered (1. 2. 3.) with sub-paragraphs (1.a, 1.b)
+- **Paragraphs:** Numbered continuously (1, 2, 3...) through entire document
+- **Sections:** Roman numerals (I, II, III...) as organizational headers
+- **Sub-items:** Lowercase letters (a, b, c...) for grouping within sections
 - **Page Numbers:** Center bottom
 - **Export:** PDF and DOCX
 
+## Federal Court Numbering Rules (Per FRCP Rule 10)
+
+```
+                         I. PARTIES
+
+1.   Plaintiff John Smith is a resident of Jackson, Mississippi...
+
+2.   Defendant ABC Corporation is a Delaware corporation...
+
+                      II. JURISDICTION
+
+3.   This Court has subject matter jurisdiction...
+
+4.   Venue is proper in this District...
+
+                   III. FACTUAL ALLEGATIONS
+
+     a. Background
+
+5.   On or about January 15, 2024...
+
+6.   The contract provided that...
+
+     b. Breach
+
+7.   Defendant failed to deliver...
+```
+
+**Key Rules:**
+- **Paragraph numbers (1, 2, 3...)** are CONTINUOUS through the entire document
+- **Section headers (I, II, III...)** organize content but DON'T restart paragraph numbering
+- **Sub-items (a, b, c...)** group related paragraphs within a section
+
 ## How It Works
 
-1. **Paste/type text** in the left editor (line-by-line view with line numbers)
+1. **Paste/type text** in the left editor (paragraph numbers shown)
 2. **Paragraphs auto-detected** from blank lines
-3. **Tree view on right** shows paragraph structure
-4. **Organize via tree** - add sections, sub-paragraphs, reorder
+3. **Tree view on right** shows section/sub-item structure
+4. **Organize via tree** - add sections, sub-items, reorder
 5. **Export** to court-ready PDF or DOCX
 
 ---
@@ -27,45 +62,68 @@ Formarter is a Python GUI application designed for lawyers who file documents in
 
 ### Iteration 1: GUI Shell with Mock Data (COMPLETE)
 
-**Goal:** Create a working PyQt6 window with 2 panels that opens maximized, with mock legal document data.
+**Goal:** Create a working PyQt6 window with 2 panels that opens maximized.
 
-**Status:**
+**Status:** COMPLETE
 - [x] Project structure created
 - [x] requirements.txt (PyQt6)
 - [x] main.py entry point
 - [x] src/app.py with MainWindow
 - [x] Window opens maximized
-- [x] Left panel: text editor with mock legal document
-- [x] Right panel: tree widget with sections and paragraphs
+- [x] Left panel: text editor
+- [x] Right panel: tree widget
 - [x] Panels resizable via splitter
-- [x] Mock data: Sample federal court complaint with PARTIES, JURISDICTION, FACTUAL ALLEGATIONS, PRAYER FOR RELIEF sections
 
 ---
 
-### Iteration 2: Line Numbers + Basic Sync (Planned)
+### Iteration 2: 100 Paragraphs + Correct Data Model (COMPLETE)
 
-- [ ] Line numbers in text editor
-- [ ] Auto-detect paragraphs (blank line separator)
-- [ ] Display paragraphs in tree
-- [ ] Real-time sync between editor and tree
+**Goal:** Implement correct federal court numbering with 100 mock paragraphs.
+
+**Status:** COMPLETE
+- [x] Data model: Document, Section, SubItem, Paragraph classes
+- [x] 100 mock paragraphs numbered 1-100 continuously
+- [x] 5 sections: PARTIES, JURISDICTION, FACTUAL ALLEGATIONS, CAUSES OF ACTION, PRAYER FOR RELIEF
+- [x] Sub-items in sections III and IV (a, b, c, d groupings)
+- [x] Tree displays hierarchy: Section > Sub-item > Paragraphs
+- [x] Paragraph numbers always continuous (never restart)
+- [x] Times New Roman 12pt font in editor
+
+**Document Structure:**
+```
+├─ I. PARTIES (paras 1-8)
+├─ II. JURISDICTION AND VENUE (paras 9-14)
+├─ III. FACTUAL ALLEGATIONS (paras 15-75)
+│  ├─ a. Background (15-25)
+│  ├─ b. The Contract (26-40)
+│  ├─ c. Defendant's Breach (41-55)
+│  └─ d. Damages Suffered (56-75)
+├─ IV. CAUSES OF ACTION (paras 76-92)
+│  ├─ a. Breach of Contract (76-82)
+│  ├─ b. Fraud (83-88)
+│  └─ c. Negligent Misrepresentation (89-92)
+└─ V. PRAYER FOR RELIEF (paras 93-100)
+```
 
 ---
 
 ### Iteration 3: Tree Interactions (Planned)
 
 - [ ] Click tree item → highlight lines in editor
-- [ ] Collapsible paragraphs
+- [ ] Collapsible sections and sub-items
 - [ ] Preview text when collapsed ("1. The plaintiff...")
 - [ ] Filter/search bar in tree
+- [ ] Real-time sync between editor and tree
 
 ---
 
-### Iteration 4: Sections & Sub-paragraphs (Planned)
+### Iteration 4: Reordering & Editing (Planned)
 
-- [ ] Add sections via right-click (FACTS, ARGUMENT, etc.)
-- [ ] Custom section numbering (Roman, Arabic, none)
-- [ ] Make sub-paragraphs via right-click
-- [ ] Drag-drop reordering
+- [ ] Add sections via right-click
+- [ ] Add sub-items via right-click
+- [ ] Drag-drop reordering of paragraphs
+- [ ] Auto-renumber paragraphs after reorder
+- [ ] Delete paragraphs
 
 ---
 
@@ -104,6 +162,10 @@ Formarter is a Python GUI application designed for lawyers who file documents in
 git clone https://github.com/megalopolisms/formarter.git
 cd formarter
 
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
 # Install dependencies
 pip install -r requirements.txt
 
@@ -115,6 +177,22 @@ python main.py
 
 - Python 3.9+
 - PyQt6
+
+## Project Structure
+
+```
+formarter/
+├── main.py                 # Entry point
+├── requirements.txt        # Dependencies
+├── README.md              # This file
+└── src/
+    ├── __init__.py
+    ├── app.py             # Main window
+    ├── mock_data.py       # 100 mock paragraphs generator
+    └── models/
+        ├── __init__.py
+        └── document.py    # Document, Section, SubItem, Paragraph
+```
 
 ## License
 

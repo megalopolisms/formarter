@@ -13,35 +13,17 @@ from PyQt6.QtWidgets import (
     QLabel,
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 
-
-# Mock legal document text for demonstration
-MOCK_DOCUMENT = """Plaintiff, John Smith, by and through undersigned counsel, respectfully submits this Complaint against Defendant, ABC Corporation, and in support thereof states as follows:
-
-Plaintiff is an individual residing in Jackson, Mississippi. Plaintiff has been a resident of Hinds County, Mississippi for the past fifteen years.
-
-Defendant ABC Corporation is a Delaware corporation with its principal place of business in Biloxi, Mississippi. Defendant regularly conducts business throughout the State of Mississippi.
-
-This Court has subject matter jurisdiction over this action pursuant to 28 U.S.C. Section 1332 because there is complete diversity of citizenship between the parties and the amount in controversy exceeds $75,000, exclusive of interest and costs.
-
-Venue is proper in this District pursuant to 28 U.S.C. Section 1391(b) because a substantial part of the events giving rise to the claims occurred in this District.
-
-On or about January 15, 2024, Plaintiff entered into a written contract with Defendant for the purchase of commercial equipment valued at $150,000.
-
-Defendant expressly warranted that the equipment would be delivered within thirty days of the contract date and would conform to all specifications outlined in Exhibit A attached hereto.
-
-Despite Plaintiff's full performance under the contract, including payment of the full purchase price, Defendant failed to deliver the equipment as promised.
-
-As a direct and proximate result of Defendant's breach, Plaintiff has suffered damages in excess of $200,000, including lost business revenue, additional equipment rental costs, and consequential damages.
-
-WHEREFORE, Plaintiff respectfully requests that this Court enter judgment in favor of Plaintiff and against Defendant, awarding compensatory damages, consequential damages, attorney's fees and costs, and such other relief as the Court deems just and proper."""
+from .mock_data import create_mock_document, get_document_as_text
+from .models import Document
 
 
 class MainWindow(QMainWindow):
     """
     Main application window with two-panel layout:
-    - Left: Text editor (line-by-line view)
-    - Right: Paragraph tree (structural view)
+    - Left: Text editor (line-by-line view with paragraph numbers)
+    - Right: Paragraph tree (structural view with sections/sub-items)
     """
 
     def __init__(self):
@@ -49,8 +31,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Formarter - Federal Court Document Formatter")
         self.setMinimumSize(800, 600)
 
+        # Create mock document with 100 paragraphs
+        self.document = create_mock_document()
+
         self._setup_ui()
-        self._load_mock_data()
+        self._load_document()
 
     def _setup_ui(self):
         """Set up the main user interface."""
@@ -78,12 +63,14 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Header label
-        header = QLabel("Text Editor")
+        header = QLabel("Text Editor - 100 Paragraphs (Continuously Numbered)")
         header.setStyleSheet("font-weight: bold; padding: 5px; background: #f0f0f0;")
         layout.addWidget(header)
 
-        # Text editor
+        # Text editor with Times New Roman font
         self.text_editor = QTextEdit()
+        font = QFont("Times New Roman", 12)
+        self.text_editor.setFont(font)
         self.text_editor.setPlaceholderText(
             "Paste or type your document text here...\n\n"
             "Blank lines will separate paragraphs."
@@ -99,50 +86,87 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Header label
-        header = QLabel("Paragraph Structure")
+        header = QLabel("Paragraph Structure (Sections + Sub-items)")
         header.setStyleSheet("font-weight: bold; padding: 5px; background: #f0f0f0;")
         layout.addWidget(header)
 
         # Tree widget
         self.tree_widget = QTreeWidget()
-        self.tree_widget.setHeaderLabels(["Paragraphs"])
+        self.tree_widget.setHeaderLabels(["Document Structure"])
         self.tree_widget.setAlternatingRowColors(True)
+
+        # Set tree font
+        font = QFont("Arial", 10)
+        self.tree_widget.setFont(font)
+
         layout.addWidget(self.tree_widget)
 
         return panel
 
-    def _load_mock_data(self):
-        """Load mock legal document for demonstration."""
-        # Set the mock text in the editor
-        self.text_editor.setText(MOCK_DOCUMENT)
+    def _load_document(self):
+        """Load the document into both panels."""
+        # Set the text in the editor
+        full_text = get_document_as_text(self.document)
+        self.text_editor.setText(full_text)
 
-        # Parse paragraphs and populate tree
-        paragraphs = [p.strip() for p in MOCK_DOCUMENT.split("\n\n") if p.strip()]
+        # Populate the tree
+        self._populate_tree()
 
-        # Create section headers and paragraphs
-        sections = {
-            "PARTIES": paragraphs[0:3],
-            "JURISDICTION AND VENUE": paragraphs[3:5],
-            "FACTUAL ALLEGATIONS": paragraphs[5:9],
-            "PRAYER FOR RELIEF": paragraphs[9:],
-        }
+    def _populate_tree(self):
+        """Populate the tree widget with document structure."""
+        self.tree_widget.clear()
 
-        para_num = 1
-        for section_name, section_paras in sections.items():
-            # Add section as parent item
-            section_item = QTreeWidgetItem([section_name])
+        for section in self.document.sections:
+            # Add section as top-level item
+            section_text = f"{section.id}. {section.title}"
+            section_item = QTreeWidgetItem([section_text])
             section_item.setFlags(
                 section_item.flags() | Qt.ItemFlag.ItemIsAutoTristate
             )
+
+            # Make section headers bold
+            font = section_item.font(0)
+            font.setBold(True)
+            section_item.setFont(0, font)
+
             self.tree_widget.addTopLevelItem(section_item)
 
-            # Add paragraphs as children
-            for para in section_paras:
-                # Truncate long paragraphs for display
-                preview = para[:60] + "..." if len(para) > 60 else para
-                para_item = QTreeWidgetItem([f"{para_num}. {preview}"])
-                section_item.addChild(para_item)
-                para_num += 1
+            if section.subitems:
+                # Section has sub-items
+                for subitem in section.subitems:
+                    # Add sub-item as child of section
+                    subitem_text = f"{subitem.id}. {subitem.title}" if subitem.title else f"{subitem.id}."
+                    subitem_item = QTreeWidgetItem([subitem_text])
+
+                    # Make sub-item headers italic
+                    font = subitem_item.font(0)
+                    font.setItalic(True)
+                    subitem_item.setFont(0, font)
+
+                    section_item.addChild(subitem_item)
+
+                    # Add paragraphs under sub-item
+                    for para_id in subitem.paragraph_ids:
+                        para = self.document.paragraphs.get(para_id)
+                        if para:
+                            para_text = f"{para.number}. {para.get_display_text(50)}"
+                            para_item = QTreeWidgetItem([para_text])
+                            subitem_item.addChild(para_item)
+
+                    # Expand sub-item
+                    subitem_item.setExpanded(True)
+            else:
+                # Paragraphs directly under section (no sub-items)
+                for para_id in section.paragraph_ids:
+                    para = self.document.paragraphs.get(para_id)
+                    if para:
+                        para_text = f"{para.number}. {para.get_display_text(50)}"
+                        para_item = QTreeWidgetItem([para_text])
+                        section_item.addChild(para_item)
 
             # Expand section by default
             section_item.setExpanded(True)
+
+        # Show count in header
+        total_paras = len(self.document.paragraphs)
+        self.tree_widget.setHeaderLabels([f"Document Structure ({total_paras} paragraphs)"])
