@@ -107,27 +107,41 @@ Formarter is a Python GUI application designed for lawyers who file documents in
 
 ---
 
-### Iteration 3: Tree Interactions (Planned)
+### Iteration 3: Live Paragraph Detection (COMPLETE)
+
+**Goal:** Remove mock data, real-time paragraph creation from user input.
+
+**Status:** COMPLETE
+- [x] App starts with empty document (no mock data)
+- [x] User types in left editor
+- [x] Blank line (Enter twice) creates new paragraph
+- [x] Paragraphs auto-numbered 1, 2, 3... in real-time
+- [x] Tree shows paragraph numbers: "1. [preview text]"
+- [x] Numbers update as user adds/removes text
+- [x] No sections by default (user creates later)
+
+---
+
+### Iteration 4: Tree Interactions (Planned)
 
 - [ ] Click tree item → highlight lines in editor
+- [ ] Click tree item → scroll to paragraph in editor
 - [ ] Collapsible sections and sub-items
-- [ ] Preview text when collapsed ("1. The plaintiff...")
 - [ ] Filter/search bar in tree
-- [ ] Real-time sync between editor and tree
 
 ---
 
-### Iteration 4: Reordering & Editing (Planned)
+### Iteration 5: Sections & Sub-items (Planned)
 
-- [ ] Add sections via right-click
-- [ ] Add sub-items via right-click
+- [ ] Add sections via right-click (I. II. III.)
+- [ ] Add sub-items via right-click (a. b. c.)
+- [ ] Assign paragraphs to sections
 - [ ] Drag-drop reordering of paragraphs
 - [ ] Auto-renumber paragraphs after reorder
-- [ ] Delete paragraphs
 
 ---
 
-### Iteration 5: Rich Text & Comments (Planned)
+### Iteration 6: Rich Text & Comments (Planned)
 
 - [ ] Bold, Italic, Underline toolbar
 - [ ] Inline comments (// and /* */) hidden in export
@@ -136,7 +150,7 @@ Formarter is a Python GUI application designed for lawyers who file documents in
 
 ---
 
-### Iteration 6: Export (Planned)
+### Iteration 7: Export (Planned)
 
 - [ ] Preview dialog
 - [ ] PDF export (Times New Roman 12pt, double-spaced, margins)
@@ -146,7 +160,7 @@ Formarter is a Python GUI application designed for lawyers who file documents in
 
 ---
 
-### Iteration 7: Save/Load & Polish (Planned)
+### Iteration 8: Save/Load & Polish (Planned)
 
 - [ ] Save project as JSON
 - [ ] Load project from JSON

@@ -15,15 +15,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-from .mock_data import create_mock_document, get_document_as_text
-from .models import Document
+from .models import Document, Paragraph
 
 
 class MainWindow(QMainWindow):
     """
     Main application window with two-panel layout:
-    - Left: Text editor (line-by-line view with paragraph numbers)
-    - Right: Paragraph tree (structural view with sections/sub-items)
+    - Left: Text editor (user types here, blank lines create paragraphs)
+    - Right: Paragraph tree (shows numbered paragraphs)
     """
 
     def __init__(self):
@@ -31,11 +30,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Formarter - Federal Court Document Formatter")
         self.setMinimumSize(800, 600)
 
-        # Create mock document with 100 paragraphs
-        self.document = create_mock_document()
+        # Start with empty document
+        self.document = Document(title="New Document")
+
+        # Flag to prevent recursive updates
+        self._updating = False
 
         self._setup_ui()
-        self._load_document()
 
     def _setup_ui(self):
         """Set up the main user interface."""
@@ -63,7 +64,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Header label
-        header = QLabel("Text Editor - 100 Paragraphs (Continuously Numbered)")
+        header = QLabel("Text Editor - Type here (blank line = new paragraph)")
         header.setStyleSheet("font-weight: bold; padding: 5px; background: #f0f0f0;")
         layout.addWidget(header)
 
@@ -72,9 +73,14 @@ class MainWindow(QMainWindow):
         font = QFont("Times New Roman", 12)
         self.text_editor.setFont(font)
         self.text_editor.setPlaceholderText(
-            "Paste or type your document text here...\n\n"
-            "Blank lines will separate paragraphs."
+            "Type your document here...\n\n"
+            "Press Enter twice (blank line) to create a new paragraph.\n\n"
+            "Each paragraph will be automatically numbered."
         )
+
+        # Connect text changed signal for real-time paragraph detection
+        self.text_editor.textChanged.connect(self._on_text_changed)
+
         layout.addWidget(self.text_editor)
 
         return panel
@@ -86,13 +92,13 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Header label
-        header = QLabel("Paragraph Structure (Sections + Sub-items)")
-        header.setStyleSheet("font-weight: bold; padding: 5px; background: #f0f0f0;")
-        layout.addWidget(header)
+        self.tree_header = QLabel("Paragraph Structure (0 paragraphs)")
+        self.tree_header.setStyleSheet("font-weight: bold; padding: 5px; background: #f0f0f0;")
+        layout.addWidget(self.tree_header)
 
         # Tree widget
         self.tree_widget = QTreeWidget()
-        self.tree_widget.setHeaderLabels(["Document Structure"])
+        self.tree_widget.setHeaderLabels(["Paragraphs"])
         self.tree_widget.setAlternatingRowColors(True)
 
         # Set tree font
@@ -103,70 +109,62 @@ class MainWindow(QMainWindow):
 
         return panel
 
-    def _load_document(self):
-        """Load the document into both panels."""
-        # Set the text in the editor
-        full_text = get_document_as_text(self.document)
-        self.text_editor.setText(full_text)
+    def _on_text_changed(self):
+        """Handle text changes - detect paragraphs in real-time."""
+        if self._updating:
+            return
 
-        # Populate the tree
-        self._populate_tree()
+        self._updating = True
+        try:
+            self._parse_paragraphs()
+            self._update_tree()
+        finally:
+            self._updating = False
 
-    def _populate_tree(self):
-        """Populate the tree widget with document structure."""
+    def _parse_paragraphs(self):
+        """Parse the editor text into paragraphs (separated by blank lines)."""
+        text = self.text_editor.toPlainText()
+
+        # Split by double newlines (blank lines)
+        # A paragraph is text between blank lines
+        raw_paragraphs = text.split("\n\n")
+
+        # Clean up and filter empty paragraphs
+        self.document.paragraphs.clear()
+
+        para_num = 1
+        for raw_para in raw_paragraphs:
+            # Clean up the paragraph text
+            cleaned = raw_para.strip()
+
+            # Skip empty paragraphs
+            if not cleaned:
+                continue
+
+            # Create paragraph with continuous numbering
+            para = Paragraph(
+                number=para_num,
+                text=cleaned,
+                section_id=""  # No section assigned yet
+            )
+            self.document.paragraphs[para_num] = para
+            para_num += 1
+
+    def _update_tree(self):
+        """Update the tree widget with current paragraphs."""
         self.tree_widget.clear()
 
-        for section in self.document.sections:
-            # Add section as top-level item
-            section_text = f"{section.id}. {section.title}"
-            section_item = QTreeWidgetItem([section_text])
-            section_item.setFlags(
-                section_item.flags() | Qt.ItemFlag.ItemIsAutoTristate
-            )
+        # Update header with paragraph count
+        count = len(self.document.paragraphs)
+        self.tree_header.setText(f"Paragraph Structure ({count} paragraph{'s' if count != 1 else ''})")
 
-            # Make section headers bold
-            font = section_item.font(0)
-            font.setBold(True)
-            section_item.setFont(0, font)
+        # Add each paragraph to the tree
+        for para_num in sorted(self.document.paragraphs.keys()):
+            para = self.document.paragraphs[para_num]
 
-            self.tree_widget.addTopLevelItem(section_item)
+            # Format: "1. Preview text here..."
+            preview = para.get_display_text(55)
+            para_text = f"{para.number}. {preview}"
 
-            if section.subitems:
-                # Section has sub-items
-                for subitem in section.subitems:
-                    # Add sub-item as child of section
-                    subitem_text = f"{subitem.id}. {subitem.title}" if subitem.title else f"{subitem.id}."
-                    subitem_item = QTreeWidgetItem([subitem_text])
-
-                    # Make sub-item headers italic
-                    font = subitem_item.font(0)
-                    font.setItalic(True)
-                    subitem_item.setFont(0, font)
-
-                    section_item.addChild(subitem_item)
-
-                    # Add paragraphs under sub-item
-                    for para_id in subitem.paragraph_ids:
-                        para = self.document.paragraphs.get(para_id)
-                        if para:
-                            para_text = f"{para.number}. {para.get_display_text(50)}"
-                            para_item = QTreeWidgetItem([para_text])
-                            subitem_item.addChild(para_item)
-
-                    # Expand sub-item
-                    subitem_item.setExpanded(True)
-            else:
-                # Paragraphs directly under section (no sub-items)
-                for para_id in section.paragraph_ids:
-                    para = self.document.paragraphs.get(para_id)
-                    if para:
-                        para_text = f"{para.number}. {para.get_display_text(50)}"
-                        para_item = QTreeWidgetItem([para_text])
-                        section_item.addChild(para_item)
-
-            # Expand section by default
-            section_item.setExpanded(True)
-
-        # Show count in header
-        total_paras = len(self.document.paragraphs)
-        self.tree_widget.setHeaderLabels([f"Document Structure ({total_paras} paragraphs)"])
+            para_item = QTreeWidgetItem([para_text])
+            self.tree_widget.addTopLevelItem(para_item)
