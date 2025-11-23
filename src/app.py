@@ -122,22 +122,22 @@ class MainWindow(QMainWindow):
             self._updating = False
 
     def _parse_paragraphs(self):
-        """Parse the editor text into paragraphs (separated by blank lines)."""
+        """Parse the editor text into paragraphs (each line = one paragraph)."""
         text = self.text_editor.toPlainText()
 
-        # Split by double newlines (blank lines)
-        # A paragraph is text between blank lines
-        raw_paragraphs = text.split("\n\n")
+        # Split by ANY newline - each line of content is a paragraph
+        # Empty lines are ignored (just visual spacing)
+        lines = text.split("\n")
 
-        # Clean up and filter empty paragraphs
+        # Clean up and filter empty lines
         self.document.paragraphs.clear()
 
         para_num = 1
-        for raw_para in raw_paragraphs:
-            # Clean up the paragraph text
-            cleaned = raw_para.strip()
+        for line in lines:
+            # Clean up the line
+            cleaned = line.strip()
 
-            # Skip empty paragraphs
+            # Skip empty lines (they're just visual spacing)
             if not cleaned:
                 continue
 
