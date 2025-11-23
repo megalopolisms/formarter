@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
     def _create_toolbar(self) -> QWidget:
         """Create toolbar with Preview and Export buttons."""
         toolbar = QWidget()
+        toolbar.setFixedHeight(36)
         toolbar.setStyleSheet("background: #f0f0f0; border-bottom: 1px solid #ccc;")
         layout = QHBoxLayout(toolbar)
         layout.setContentsMargins(5, 2, 5, 2)
@@ -119,8 +120,8 @@ class MainWindow(QMainWindow):
                 background: #4a90d9;
                 color: white;
                 border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
+                padding: 4px 12px;
+                border-radius: 3px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -137,8 +138,8 @@ class MainWindow(QMainWindow):
                 background: #5cb85c;
                 color: white;
                 border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
+                padding: 4px 12px;
+                border-radius: 3px;
                 font-weight: bold;
             }
             QPushButton:hover {
