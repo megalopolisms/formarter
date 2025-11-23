@@ -110,7 +110,7 @@ class MainWindow(QMainWindow):
         toolbar = QWidget()
         toolbar.setStyleSheet("background: #f0f0f0; border-bottom: 1px solid #ccc;")
         layout = QHBoxLayout(toolbar)
-        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setContentsMargins(5, 2, 5, 2)
 
         # Preview button
         preview_btn = QPushButton("Preview PDF")
