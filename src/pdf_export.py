@@ -18,13 +18,17 @@ from typing import TYPE_CHECKING
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
 from reportlab.platypus import (
     SimpleDocTemplate,
     Paragraph,
     Spacer,
     PageBreak,
+    Table,
+    TableStyle,
+    KeepTogether,
 )
+from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -119,11 +123,218 @@ def _add_page_number(canvas, doc):
     canvas.restoreState()
 
 
+def _build_caption(caption, font_name: str) -> list:
+    """
+    Build the federal court case caption header.
+
+    Format:
+    - Court name centered at top (bold)
+    - Case number right-aligned after court (size 10)
+    - Plaintiff name on left, "Plaintiff," label on right
+    - "v." on left
+    - Defendant name on left, "Defendant." label on right
+    """
+    styles = getSampleStyleSheet()
+    elements = []
+
+    # Usable width (page width minus margins)
+    usable_width = PAGE_WIDTH - 2 * MARGIN
+
+    # Court name style (centered, bold, caps) - no space between lines
+    court_style = ParagraphStyle(
+        'CourtName',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=LINE_SPACING,
+        alignment=TA_CENTER,
+        spaceAfter=0,  # No space between court name lines
+    )
+
+    # Case number style (right aligned, size 10)
+    case_style = ParagraphStyle(
+        'CaseNumber',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=10,  # Size 10pt as requested
+        leading=LINE_SPACING,
+        alignment=TA_RIGHT,
+    )
+
+    # Party name style (left aligned)
+    party_style = ParagraphStyle(
+        'PartyName',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=LINE_SPACING,
+        alignment=TA_LEFT,
+    )
+
+    # Label style (right aligned for Plaintiff/Defendant labels)
+    label_style = ParagraphStyle(
+        'PartyLabel',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=LINE_SPACING,
+        alignment=TA_RIGHT,
+    )
+
+    # Court name (two lines centered, bold)
+    court_lines = caption.court.split('\n')
+    for line in court_lines:
+        elements.append(Paragraph(f"<b>{line}</b>", court_style))
+
+    # Case number right after court, right-aligned
+    case_num_text = f"Case No. {caption.case_number}" if caption.case_number else ""
+    if case_num_text:
+        elements.append(Spacer(1, LINE_SPACING / 2))
+        elements.append(Paragraph(case_num_text, case_style))
+
+    elements.append(Spacer(1, LINE_SPACING / 2))
+
+    # Build caption table
+    # Left column: party names, Right column: labels (Plaintiff, Defendant)
+    col_width = usable_width / 2
+
+    plaintiff_text = caption.plaintiff.upper() if caption.plaintiff else ""
+    defendant_text = caption.defendant.upper() if caption.defendant else ""
+
+    # Table data
+    table_data = []
+
+    # Row 1: Plaintiff name on left, "Plaintiff," label on right
+    if plaintiff_text:
+        table_data.append([
+            Paragraph(plaintiff_text + ",", party_style),
+            Paragraph("Plaintiff,", label_style)
+        ])
+
+    # Row 2: v.
+    table_data.append([
+        Paragraph("<b>v.</b>", party_style),
+        ""
+    ])
+
+    # Row 3: Defendant name on left, "Defendant." label on right
+    if defendant_text:
+        table_data.append([
+            Paragraph(defendant_text + ",", party_style),
+            Paragraph("Defendant.", label_style)
+        ])
+
+    if table_data:
+        caption_table = Table(
+            table_data,
+            colWidths=[col_width, col_width],
+        )
+        caption_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        elements.append(caption_table)
+
+    elements.append(Spacer(1, LINE_SPACING))
+
+    return elements
+
+
+def _build_signature_and_certificate(signature, font_name: str) -> list:
+    """
+    Build the signature block and certificate of service.
+
+    These are kept together on the same page using KeepTogether.
+    """
+    styles = getSampleStyleSheet()
+    elements = []
+
+    # Signature block style
+    sig_style = ParagraphStyle(
+        'SignatureBlock',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=LINE_SPACING,
+        alignment=TA_LEFT,
+        spaceAfter=0,
+    )
+
+    # Certificate header style (centered, bold)
+    cert_header_style = ParagraphStyle(
+        'CertHeader',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=LINE_SPACING,
+        alignment=TA_CENTER,
+        spaceAfter=LINE_SPACING / 2,
+    )
+
+    # Certificate body style
+    cert_body_style = ParagraphStyle(
+        'CertBody',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=LINE_SPACING,
+        alignment=TA_JUSTIFY,
+        firstLineIndent=0.5 * inch,
+    )
+
+    # Add some space before signature
+    elements.append(Spacer(1, LINE_SPACING * 2))
+
+    # Respectfully submitted
+    elements.append(Paragraph("Respectfully submitted,", sig_style))
+    elements.append(Spacer(1, LINE_SPACING * 2))
+
+    # Signature line
+    elements.append(Paragraph(f"/s/ {signature.attorney_name}", sig_style))
+
+    # Attorney details
+    if signature.attorney_name:
+        elements.append(Paragraph(f"<b>{signature.attorney_name}</b>", sig_style))
+    if signature.bar_number:
+        elements.append(Paragraph(signature.bar_number, sig_style))
+    if signature.firm_name:
+        elements.append(Paragraph(signature.firm_name, sig_style))
+    if signature.address:
+        elements.append(Paragraph(signature.address, sig_style))
+    if signature.phone:
+        elements.append(Paragraph(f"Tel: {signature.phone}", sig_style))
+    if signature.email:
+        elements.append(Paragraph(signature.email, sig_style))
+
+    # Certificate of Service
+    elements.append(Spacer(1, LINE_SPACING * 2))
+    elements.append(Paragraph("<b>CERTIFICATE OF SERVICE</b>", cert_header_style))
+
+    cert_text = (
+        "I hereby certify that on this date, I electronically filed the foregoing "
+        "with the Clerk of Court using the CM/ECF system, which will send notification "
+        "of such filing to all counsel of record."
+    )
+    elements.append(Paragraph(cert_text, cert_body_style))
+
+    # Signature on certificate
+    elements.append(Spacer(1, LINE_SPACING * 2))
+    elements.append(Paragraph(f"/s/ {signature.attorney_name}", sig_style))
+
+    # Wrap everything in KeepTogether so they stay on same page
+    return [KeepTogether(elements)]
+
+
 def generate_pdf(
     paragraphs: dict,
     section_starts: dict,
     output_path: str | None = None,
-    global_spacing=None
+    global_spacing=None,
+    caption=None,
+    signature=None
 ) -> str:
     """
     Generate a PDF document with federal court formatting.
@@ -133,6 +344,8 @@ def generate_pdf(
         section_starts: Dict of paragraph number -> Section object (where sections start)
         output_path: Optional path to save PDF. If None, creates temp file.
         global_spacing: Global SpacingSettings object (optional)
+        caption: CaseCaption object for court header (optional)
+        signature: SignatureBlock object for signature and certificate of service (optional)
 
     Returns:
         Path to the generated PDF file.
@@ -169,6 +382,12 @@ def generate_pdf(
 
     # Build content
     story = []
+
+    # Add caption if provided and has content
+    if caption and (caption.plaintiff or caption.defendant or caption.case_number):
+        story.extend(_build_caption(caption, font_name))
+        story.append(Spacer(1, LINE_SPACING))
+
     current_section = None
     is_first_para_in_section = False
 
@@ -206,6 +425,10 @@ def generate_pdf(
         safe_text = para.text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         para_text = f"{para.number}.&nbsp;&nbsp;&nbsp;{safe_text}"
         story.append(Paragraph(para_text, styles['paragraph']))
+
+    # Add signature block and certificate of service if provided
+    if signature and signature.attorney_name:
+        story.extend(_build_signature_and_certificate(signature, font_name))
 
     # Build PDF with page numbers
     doc.build(story, onFirstPage=_add_page_number, onLaterPages=_add_page_number)

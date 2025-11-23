@@ -29,11 +29,13 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QCheckBox,
     QDialogButtonBox,
+    QLineEdit,
+    QComboBox,
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage
 
-from .models import Document, Paragraph, Section, SpacingSettings
+from .models import Document, Paragraph, Section, SpacingSettings, CaseCaption, SignatureBlock, CaseProfile
 from .pdf_export import generate_pdf
 
 
@@ -54,6 +56,47 @@ class MainWindow(QMainWindow):
     # But reportlab adds paragraph spacing, so ~22-24 short paragraphs fit per page
     LINES_PER_PAGE = 54  # Single-spaced equivalent lines (27 double-spaced * 2)
     CHARS_PER_LINE = 78  # ~6.5" width at 12 chars/inch for Times New Roman 12pt
+
+    # Shared signature block for all Petrini cases
+    PETRINI_SIGNATURE = SignatureBlock(
+        attorney_name="Yuri Petrini",
+        bar_number="",
+        firm_name="",
+        address="929 Division Street, Biloxi, MS 39530",
+        phone="(305) 504-1323",
+        email="yuri@megalopolisms.com, sumire@megalopolisms.com",
+    )
+
+    # Pre-configured case profiles
+    CASE_PROFILES = [
+        CaseProfile(
+            name="178 - Petrini & Maeda v. Biloxi",
+            caption=CaseCaption(
+                plaintiff="YURI PETRINI & SUMIRE MAEDA",
+                defendant="CITY OF BILOXI, MISSISSIPPI, et al.",
+                case_number="1:25-cv-00178",
+            ),
+            signature=PETRINI_SIGNATURE,
+        ),
+        CaseProfile(
+            name="233 - Petrini & Maeda v. Biloxi",
+            caption=CaseCaption(
+                plaintiff="YURI PETRINI & SUMIRE MAEDA",
+                defendant="CITY OF BILOXI, MISSISSIPPI, et al.",
+                case_number="1:25-cv-00233",
+            ),
+            signature=PETRINI_SIGNATURE,
+        ),
+        CaseProfile(
+            name="254 - Petrini v. Biloxi",
+            caption=CaseCaption(
+                plaintiff="YURI PETRINI",
+                defendant="CITY OF BILOXI, MISSISSIPPI, et al.",
+                case_number="1:25-cv-00254",
+            ),
+            signature=PETRINI_SIGNATURE,
+        ),
+    ]
 
     def __init__(self):
         super().__init__()
@@ -123,6 +166,22 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(toolbar)
         layout.setContentsMargins(5, 2, 5, 2)
 
+        # Case profile dropdown
+        case_label = QLabel("Case:")
+        case_label.setStyleSheet("font-weight: bold; margin-right: 3px;")
+        layout.addWidget(case_label)
+
+        self.case_dropdown = QComboBox()
+        self.case_dropdown.addItem("-- Select Case --")
+        for profile in self.CASE_PROFILES:
+            self.case_dropdown.addItem(profile.name)
+        self.case_dropdown.setMinimumWidth(200)
+        self.case_dropdown.currentIndexChanged.connect(self._on_case_selected)
+        layout.addWidget(self.case_dropdown)
+
+        # Separator
+        layout.addSpacing(10)
+
         # Preview button
         preview_btn = QPushButton("Preview PDF")
         preview_btn.setStyleSheet("""
@@ -176,6 +235,42 @@ class MainWindow(QMainWindow):
         """)
         options_btn.clicked.connect(self._on_options_clicked)
         layout.addWidget(options_btn)
+
+        # Caption button
+        caption_btn = QPushButton("Caption")
+        caption_btn.setStyleSheet("""
+            QPushButton {
+                background: #17a2b8;
+                color: white;
+                border: none;
+                padding: 4px 12px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #138496;
+            }
+        """)
+        caption_btn.clicked.connect(self._on_caption_clicked)
+        layout.addWidget(caption_btn)
+
+        # Signature button
+        signature_btn = QPushButton("Signature")
+        signature_btn.setStyleSheet("""
+            QPushButton {
+                background: #6f42c1;
+                color: white;
+                border: none;
+                padding: 4px 12px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #5a32a3;
+            }
+        """)
+        signature_btn.clicked.connect(self._on_signature_clicked)
+        layout.addWidget(signature_btn)
 
         # Spacer
         layout.addStretch()
@@ -684,7 +779,9 @@ class MainWindow(QMainWindow):
             pdf_path = generate_pdf(
                 self.document.paragraphs,
                 self._section_starts,
-                global_spacing=self._global_spacing
+                global_spacing=self._global_spacing,
+                caption=self.document.caption,
+                signature=self.document.signature
             )
 
             # Open in system PDF viewer (Preview.app on macOS)
@@ -733,7 +830,9 @@ class MainWindow(QMainWindow):
                 self.document.paragraphs,
                 self._section_starts,
                 output_path=file_path,
-                global_spacing=self._global_spacing
+                global_spacing=self._global_spacing,
+                caption=self.document.caption,
+                signature=self.document.signature
             )
 
             # Show success and offer to open
@@ -766,6 +865,42 @@ class MainWindow(QMainWindow):
             self._global_spacing = dialog.get_spacing()
             self._calculate_pages()
             self._update_page_tree()
+
+    def _on_caption_clicked(self):
+        """Handle Caption button click - show case caption dialog."""
+        dialog = CaptionDialog(self.document.caption, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.document.caption = dialog.get_caption()
+
+    def _on_signature_clicked(self):
+        """Handle Signature button click - show signature block dialog."""
+        dialog = SignatureDialog(self.document.signature, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.document.signature = dialog.get_signature()
+
+    def _on_case_selected(self, index: int):
+        """Handle case profile selection from dropdown."""
+        if index == 0:  # "-- Select Case --" option
+            return
+
+        # Get the selected profile (index - 1 because of placeholder item)
+        profile = self.CASE_PROFILES[index - 1]
+
+        # Apply caption and signature from profile
+        self.document.caption = CaseCaption(
+            court=profile.caption.court,
+            plaintiff=profile.caption.plaintiff,
+            defendant=profile.caption.defendant,
+            case_number=profile.caption.case_number,
+        )
+        self.document.signature = SignatureBlock(
+            attorney_name=profile.signature.attorney_name,
+            bar_number=profile.signature.bar_number,
+            firm_name=profile.signature.firm_name,
+            address=profile.signature.address,
+            phone=profile.signature.phone,
+            email=profile.signature.email,
+        )
 
 
 class SpacingDialog(QDialog):
@@ -843,4 +978,148 @@ class SpacingDialog(QDialog):
             before_section=self.before_section.value(),
             after_section=self.after_section.value(),
             between_paragraphs=self.between_paragraphs.value(),
+        )
+
+
+class CaptionDialog(QDialog):
+    """Dialog for configuring case caption (court header)."""
+
+    def __init__(self, current_caption: CaseCaption, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Case Caption")
+        self.setMinimumWidth(400)
+        self._setup_ui(current_caption)
+
+    def _setup_ui(self, caption: CaseCaption):
+        layout = QVBoxLayout(self)
+
+        # Court name (read-only display)
+        court_group = QGroupBox("Court")
+        court_layout = QVBoxLayout(court_group)
+        court_label = QLabel(caption.court.replace('\n', ' - '))
+        court_label.setStyleSheet("font-weight: bold;")
+        court_layout.addWidget(court_label)
+        layout.addWidget(court_group)
+
+        # Case information
+        case_group = QGroupBox("Case Information")
+        form = QFormLayout(case_group)
+
+        # Plaintiff
+        self.plaintiff_edit = QLineEdit()
+        self.plaintiff_edit.setText(caption.plaintiff)
+        self.plaintiff_edit.setPlaceholderText("e.g., JOHN DOE")
+        form.addRow("Plaintiff:", self.plaintiff_edit)
+
+        # Defendant
+        self.defendant_edit = QLineEdit()
+        self.defendant_edit.setText(caption.defendant)
+        self.defendant_edit.setPlaceholderText("e.g., ACME CORPORATION")
+        form.addRow("Defendant:", self.defendant_edit)
+
+        # Case number
+        self.case_number_edit = QLineEdit()
+        self.case_number_edit.setText(caption.case_number)
+        self.case_number_edit.setPlaceholderText("e.g., 3:24-cv-00123")
+        form.addRow("Case Number:", self.case_number_edit)
+
+        layout.addWidget(case_group)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def get_caption(self) -> CaseCaption:
+        """Get the configured caption settings."""
+        return CaseCaption(
+            plaintiff=self.plaintiff_edit.text().strip(),
+            defendant=self.defendant_edit.text().strip(),
+            case_number=self.case_number_edit.text().strip(),
+        )
+
+
+class SignatureDialog(QDialog):
+    """Dialog for configuring signature block information."""
+
+    def __init__(self, current_signature: SignatureBlock, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Signature Block")
+        self.setMinimumWidth(400)
+        self._setup_ui(current_signature)
+
+    def _setup_ui(self, signature: SignatureBlock):
+        layout = QVBoxLayout(self)
+
+        # Attorney information
+        attorney_group = QGroupBox("Attorney Information")
+        form = QFormLayout(attorney_group)
+
+        # Attorney name
+        self.attorney_name_edit = QLineEdit()
+        self.attorney_name_edit.setText(signature.attorney_name)
+        self.attorney_name_edit.setPlaceholderText("e.g., John Smith")
+        form.addRow("Attorney Name:", self.attorney_name_edit)
+
+        # Bar number
+        self.bar_number_edit = QLineEdit()
+        self.bar_number_edit.setText(signature.bar_number)
+        self.bar_number_edit.setPlaceholderText("e.g., MSB 12345")
+        form.addRow("Bar Number:", self.bar_number_edit)
+
+        # Firm name
+        self.firm_name_edit = QLineEdit()
+        self.firm_name_edit.setText(signature.firm_name)
+        self.firm_name_edit.setPlaceholderText("e.g., Smith & Associates, PLLC")
+        form.addRow("Firm Name:", self.firm_name_edit)
+
+        # Address
+        self.address_edit = QLineEdit()
+        self.address_edit.setText(signature.address)
+        self.address_edit.setPlaceholderText("e.g., 123 Main St, Jackson, MS 39201")
+        form.addRow("Address:", self.address_edit)
+
+        # Phone
+        self.phone_edit = QLineEdit()
+        self.phone_edit.setText(signature.phone)
+        self.phone_edit.setPlaceholderText("e.g., (601) 555-1234")
+        form.addRow("Phone:", self.phone_edit)
+
+        # Email
+        self.email_edit = QLineEdit()
+        self.email_edit.setText(signature.email)
+        self.email_edit.setPlaceholderText("e.g., jsmith@lawfirm.com")
+        form.addRow("Email:", self.email_edit)
+
+        layout.addWidget(attorney_group)
+
+        # Certificate of Service note
+        cert_label = QLabel(
+            "<i>Certificate of Service will be automatically added stating "
+            "all counsel were served via ECF at time of filing.</i>"
+        )
+        cert_label.setWordWrap(True)
+        cert_label.setStyleSheet("color: #666; padding: 5px;")
+        layout.addWidget(cert_label)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def get_signature(self) -> SignatureBlock:
+        """Get the configured signature block settings."""
+        return SignatureBlock(
+            attorney_name=self.attorney_name_edit.text().strip(),
+            bar_number=self.bar_number_edit.text().strip(),
+            firm_name=self.firm_name_edit.text().strip(),
+            address=self.address_edit.text().strip(),
+            phone=self.phone_edit.text().strip(),
+            email=self.email_edit.text().strip(),
         )

@@ -13,6 +13,44 @@ from typing import Optional
 
 
 @dataclass
+class CaseCaption:
+    """
+    Federal court case caption/header information.
+    Appears at the top of every document.
+    """
+    court: str = "IN THE UNITED STATES DISTRICT COURT\nFOR THE SOUTHERN DISTRICT OF MISSISSIPPI"
+    plaintiff: str = ""
+    defendant: str = ""
+    case_number: str = ""
+
+
+@dataclass
+class SignatureBlock:
+    """
+    Signature block and certificate of service information.
+    Appears at the end of every document.
+    """
+    attorney_name: str = ""
+    bar_number: str = ""
+    firm_name: str = ""
+    address: str = ""
+    phone: str = ""
+    email: str = ""
+    # Certificate of Service is auto-generated with ECF language
+
+
+@dataclass
+class CaseProfile:
+    """
+    Pre-configured case profile for quick selection.
+    Contains caption and signature info for a specific lawsuit.
+    """
+    name: str  # Display name for dropdown (e.g., "178 - Petrini v. Biloxi")
+    caption: CaseCaption
+    signature: SignatureBlock
+
+
+@dataclass
 class SpacingSettings:
     """
     Spacing settings for document formatting.
@@ -89,6 +127,8 @@ class Document:
     title: str = "Untitled Document"
     sections: list[Section] = field(default_factory=list)
     paragraphs: dict[int, Paragraph] = field(default_factory=dict)  # number -> Paragraph
+    caption: CaseCaption = field(default_factory=CaseCaption)
+    signature: SignatureBlock = field(default_factory=SignatureBlock)
 
     def add_section(self, section_id: str, title: str) -> Section:
         """Add a new section to the document."""
