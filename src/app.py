@@ -2,6 +2,11 @@
 Main application window for Formarter.
 """
 
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
 from PyQt6.QtWidgets import (
     QMainWindow,
     QSplitter,
@@ -10,14 +15,21 @@ from PyQt6.QtWidgets import (
     QTreeWidgetItem,
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QLabel,
     QMenu,
     QInputDialog,
+    QPushButton,
+    QFileDialog,
+    QDialog,
+    QScrollArea,
+    QMessageBox,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QTextCursor, QAction
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage
 
 from .models import Document, Paragraph, Section
+from .pdf_export import generate_pdf
 
 
 class MainWindow(QMainWindow):
@@ -59,7 +71,17 @@ class MainWindow(QMainWindow):
         self._setup_ui()
 
     def _setup_ui(self):
-        """Set up the main user interface with 3 panels."""
+        """Set up the main user interface with toolbar and 3 panels."""
+        # Create main container
+        main_widget = QWidget()
+        main_layout = QVBoxLayout(main_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Create toolbar
+        toolbar = self._create_toolbar()
+        main_layout.addWidget(toolbar)
+
         # Create the main splitter for three-panel layout
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -78,8 +100,63 @@ class MainWindow(QMainWindow):
         # Set initial sizes (40/30/30 split)
         splitter.setSizes([400, 300, 300])
 
-        # Set splitter as central widget
-        self.setCentralWidget(splitter)
+        main_layout.addWidget(splitter)
+
+        # Set main widget as central widget
+        self.setCentralWidget(main_widget)
+
+    def _create_toolbar(self) -> QWidget:
+        """Create toolbar with Preview and Export buttons."""
+        toolbar = QWidget()
+        toolbar.setStyleSheet("background: #f0f0f0; border-bottom: 1px solid #ccc;")
+        layout = QHBoxLayout(toolbar)
+        layout.setContentsMargins(10, 5, 10, 5)
+
+        # Preview button
+        preview_btn = QPushButton("Preview PDF")
+        preview_btn.setStyleSheet("""
+            QPushButton {
+                background: #4a90d9;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #357abd;
+            }
+        """)
+        preview_btn.clicked.connect(self._on_preview_clicked)
+        layout.addWidget(preview_btn)
+
+        # Export button
+        export_btn = QPushButton("Export PDF")
+        export_btn.setStyleSheet("""
+            QPushButton {
+                background: #5cb85c;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #449d44;
+            }
+        """)
+        export_btn.clicked.connect(self._on_export_clicked)
+        layout.addWidget(export_btn)
+
+        # Spacer
+        layout.addStretch()
+
+        # Document info label
+        self.doc_info_label = QLabel("0 paragraphs | 0 sections | 0 pages")
+        self.doc_info_label.setStyleSheet("color: #666;")
+        layout.addWidget(self.doc_info_label)
+
+        return toolbar
 
     def _create_editor_panel(self) -> QWidget:
         """Create the left panel with text editor."""
@@ -178,6 +255,7 @@ class MainWindow(QMainWindow):
             self._calculate_pages()
             self._update_section_tree()
             self._update_page_tree()
+            self._update_doc_info()
         finally:
             self._updating = False
 
@@ -517,3 +595,102 @@ class MainWindow(QMainWindow):
             self.text_editor.setFocus()
         finally:
             self._updating = False
+
+    def _update_doc_info(self):
+        """Update the document info label in toolbar."""
+        para_count = len(self.document.paragraphs)
+        section_count = len(self._section_starts)
+        page_count = len(self._page_assignments)
+        self.doc_info_label.setText(
+            f"{para_count} paragraph{'s' if para_count != 1 else ''} | "
+            f"{section_count} section{'s' if section_count != 1 else ''} | "
+            f"{page_count} page{'s' if page_count != 1 else ''}"
+        )
+
+    def _on_preview_clicked(self):
+        """Handle Preview button click - generate PDF and open in system viewer."""
+        if not self.document.paragraphs:
+            QMessageBox.warning(
+                self,
+                "No Content",
+                "Please add some paragraphs before previewing."
+            )
+            return
+
+        try:
+            # Generate PDF to temp file
+            pdf_path = generate_pdf(
+                self.document.paragraphs,
+                self._section_starts
+            )
+
+            # Open in system PDF viewer (Preview.app on macOS)
+            if sys.platform == "darwin":
+                subprocess.run(["open", pdf_path], check=True)
+            elif sys.platform == "win32":
+                subprocess.run(["start", "", pdf_path], shell=True, check=True)
+            else:
+                subprocess.run(["xdg-open", pdf_path], check=True)
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Preview Error",
+                f"Failed to generate preview:\n{str(e)}"
+            )
+
+    def _on_export_clicked(self):
+        """Handle Export button click - save PDF to user-selected location."""
+        if not self.document.paragraphs:
+            QMessageBox.warning(
+                self,
+                "No Content",
+                "Please add some paragraphs before exporting."
+            )
+            return
+
+        # Show save dialog
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export PDF",
+            "document.pdf",
+            "PDF Files (*.pdf)"
+        )
+
+        if not file_path:
+            return
+
+        # Ensure .pdf extension
+        if not file_path.lower().endswith('.pdf'):
+            file_path += '.pdf'
+
+        try:
+            # Generate PDF
+            generate_pdf(
+                self.document.paragraphs,
+                self._section_starts,
+                output_path=file_path
+            )
+
+            # Show success and offer to open
+            result = QMessageBox.question(
+                self,
+                "Export Successful",
+                f"PDF saved to:\n{file_path}\n\nOpen in PDF viewer?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if result == QMessageBox.StandardButton.Yes:
+                if sys.platform == "darwin":
+                    subprocess.run(["open", file_path], check=True)
+                elif sys.platform == "win32":
+                    subprocess.run(["start", "", file_path], shell=True, check=True)
+                else:
+                    subprocess.run(["xdg-open", file_path], check=True)
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Error",
+                f"Failed to export PDF:\n{str(e)}"
+            )
