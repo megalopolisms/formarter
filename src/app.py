@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QLabel,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QTextCursor
 
 from .models import Document, Paragraph
 
@@ -32,6 +32,9 @@ class MainWindow(QMainWindow):
 
         # Start with empty document
         self.document = Document(title="New Document")
+
+        # Track line positions for each paragraph (para_num -> line_index)
+        self._para_line_map: dict[int, int] = {}
 
         # Flag to prevent recursive updates
         self._updating = False
@@ -64,7 +67,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Header label
-        header = QLabel("Text Editor - Type here (blank line = new paragraph)")
+        header = QLabel("Text Editor - Type here (Enter = new paragraph)")
         header.setStyleSheet("font-weight: bold; padding: 5px; background: #f0f0f0;")
         layout.addWidget(header)
 
@@ -74,8 +77,9 @@ class MainWindow(QMainWindow):
         self.text_editor.setFont(font)
         self.text_editor.setPlaceholderText(
             "Type your document here...\n\n"
-            "Press Enter twice (blank line) to create a new paragraph.\n\n"
-            "Each paragraph will be automatically numbered."
+            "Press Enter to create a new paragraph.\n\n"
+            "Each paragraph will be automatically numbered.\n\n"
+            "Click a paragraph in the tree to highlight it."
         )
 
         # Connect text changed signal for real-time paragraph detection
@@ -105,6 +109,9 @@ class MainWindow(QMainWindow):
         font = QFont("Arial", 10)
         self.tree_widget.setFont(font)
 
+        # Connect click signal to highlight paragraph in editor
+        self.tree_widget.itemClicked.connect(self._on_tree_item_clicked)
+
         layout.addWidget(self.tree_widget)
 
         return panel
@@ -131,9 +138,10 @@ class MainWindow(QMainWindow):
 
         # Clean up and filter empty lines
         self.document.paragraphs.clear()
+        self._para_line_map.clear()
 
         para_num = 1
-        for line in lines:
+        for line_idx, line in enumerate(lines):
             # Clean up the line
             cleaned = line.strip()
 
@@ -148,6 +156,10 @@ class MainWindow(QMainWindow):
                 section_id=""  # No section assigned yet
             )
             self.document.paragraphs[para_num] = para
+
+            # Track which line this paragraph is on
+            self._para_line_map[para_num] = line_idx
+
             para_num += 1
 
     def _update_tree(self):
@@ -167,4 +179,52 @@ class MainWindow(QMainWindow):
             para_text = f"{para.number}. {preview}"
 
             para_item = QTreeWidgetItem([para_text])
+            # Store paragraph number in item data for click handling
+            para_item.setData(0, Qt.ItemDataRole.UserRole, para_num)
             self.tree_widget.addTopLevelItem(para_item)
+
+    def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
+        """Handle click on tree item - highlight and scroll to paragraph in editor."""
+        # Get paragraph number from item data
+        para_num = item.data(0, Qt.ItemDataRole.UserRole)
+        if para_num is None:
+            return
+
+        # Get the line index for this paragraph
+        line_idx = self._para_line_map.get(para_num)
+        if line_idx is None:
+            return
+
+        # Get the text and find the line position
+        text = self.text_editor.toPlainText()
+        lines = text.split("\n")
+
+        if line_idx >= len(lines):
+            return
+
+        # Calculate character position for this line
+        char_pos = sum(len(lines[i]) + 1 for i in range(line_idx))  # +1 for newline
+        line_length = len(lines[line_idx])
+
+        # Prevent triggering text changed while selecting
+        self._updating = True
+        try:
+            # Create cursor and select the line
+            cursor = self.text_editor.textCursor()
+
+            # Move to start of line
+            cursor.setPosition(char_pos)
+
+            # Select the entire line
+            cursor.setPosition(char_pos + line_length, QTextCursor.MoveMode.KeepAnchor)
+
+            # Apply selection to editor
+            self.text_editor.setTextCursor(cursor)
+
+            # Ensure the line is visible
+            self.text_editor.ensureCursorVisible()
+
+            # Focus the editor
+            self.text_editor.setFocus()
+        finally:
+            self._updating = False
