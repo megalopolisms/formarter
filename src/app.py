@@ -22,19 +22,24 @@ from .models import Document, Paragraph, Section
 
 class MainWindow(QMainWindow):
     """
-    Main application window with two-panel layout:
-    - Left: Text editor (user types here, blank lines create paragraphs)
-    - Right: Paragraph tree (shows numbered paragraphs grouped by sections)
+    Main application window with three-panel layout:
+    - Left: Text editor (user types here)
+    - Middle: Section tree (paragraphs grouped by sections)
+    - Right: Page tree (paragraphs grouped by page number)
     """
 
     # Roman numerals for section numbering
     ROMAN_NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X",
                       "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX"]
 
+    # Page formatting constants (federal court standard)
+    LINES_PER_PAGE = 25  # Approximate lines per page (double-spaced, 1" margins)
+    CHARS_PER_LINE = 65  # Approximate characters per line (Times New Roman 12pt, 1" margins)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Formarter - Federal Court Document Formatter")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(1200, 600)
 
         # Start with empty document
         self.document = Document(title="New Document")
@@ -45,26 +50,33 @@ class MainWindow(QMainWindow):
         # Track which paragraph starts each section (para_num -> section)
         self._section_starts: dict[int, Section] = {}
 
+        # Track page assignments (page_num -> list of para_nums)
+        self._page_assignments: dict[int, list[int]] = {}
+
         # Flag to prevent recursive updates
         self._updating = False
 
         self._setup_ui()
 
     def _setup_ui(self):
-        """Set up the main user interface."""
-        # Create the main splitter for two-panel layout
+        """Set up the main user interface with 3 panels."""
+        # Create the main splitter for three-panel layout
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Left panel: Text Editor
         left_panel = self._create_editor_panel()
         splitter.addWidget(left_panel)
 
-        # Right panel: Paragraph Tree
-        right_panel = self._create_tree_panel()
+        # Middle panel: Section Tree
+        middle_panel = self._create_section_tree_panel()
+        splitter.addWidget(middle_panel)
+
+        # Right panel: Page Tree
+        right_panel = self._create_page_tree_panel()
         splitter.addWidget(right_panel)
 
-        # Set initial sizes (50/50 split)
-        splitter.setSizes([500, 500])
+        # Set initial sizes (40/30/30 split)
+        splitter.setSizes([400, 300, 300])
 
         # Set splitter as central widget
         self.setCentralWidget(splitter)
@@ -76,8 +88,8 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Header label
-        header = QLabel("Text Editor - Type here (Enter = new paragraph)")
-        header.setStyleSheet("font-weight: bold; padding: 5px; background: #f0f0f0;")
+        header = QLabel("Text Editor")
+        header.setStyleSheet("font-weight: bold; padding: 5px; background: #e8f4e8;")
         layout.addWidget(header)
 
         # Text editor with Times New Roman font
@@ -87,7 +99,7 @@ class MainWindow(QMainWindow):
         self.text_editor.setPlaceholderText(
             "Type your document here...\n\n"
             "Press Enter to create a new paragraph.\n\n"
-            "Right-click paragraphs in tree to assign sections."
+            "Right-click paragraphs in Section Tree to assign sections."
         )
 
         # Connect text changed signal for real-time paragraph detection
@@ -97,34 +109,61 @@ class MainWindow(QMainWindow):
 
         return panel
 
-    def _create_tree_panel(self) -> QWidget:
-        """Create the right panel with paragraph tree."""
+    def _create_section_tree_panel(self) -> QWidget:
+        """Create the middle panel with section tree."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Header label
-        self.tree_header = QLabel("Paragraph Structure (0 paragraphs)")
-        self.tree_header.setStyleSheet("font-weight: bold; padding: 5px; background: #f0f0f0;")
-        layout.addWidget(self.tree_header)
+        self.section_tree_header = QLabel("Section Tree (0 paragraphs)")
+        self.section_tree_header.setStyleSheet("font-weight: bold; padding: 5px; background: #e8e8f4;")
+        layout.addWidget(self.section_tree_header)
 
         # Tree widget
-        self.tree_widget = QTreeWidget()
-        self.tree_widget.setHeaderLabels(["Paragraphs"])
-        self.tree_widget.setAlternatingRowColors(True)
+        self.section_tree = QTreeWidget()
+        self.section_tree.setHeaderLabels(["Sections & Paragraphs"])
+        self.section_tree.setAlternatingRowColors(True)
 
         # Set tree font
         font = QFont("Arial", 10)
-        self.tree_widget.setFont(font)
+        self.section_tree.setFont(font)
 
         # Enable right-click context menu
-        self.tree_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tree_widget.customContextMenuRequested.connect(self._on_tree_context_menu)
+        self.section_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.section_tree.customContextMenuRequested.connect(self._on_section_tree_context_menu)
 
         # Connect click signal to highlight paragraph in editor
-        self.tree_widget.itemClicked.connect(self._on_tree_item_clicked)
+        self.section_tree.itemClicked.connect(self._on_tree_item_clicked)
 
-        layout.addWidget(self.tree_widget)
+        layout.addWidget(self.section_tree)
+
+        return panel
+
+    def _create_page_tree_panel(self) -> QWidget:
+        """Create the right panel with page tree."""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Header label
+        self.page_tree_header = QLabel("Page Tree (0 pages)")
+        self.page_tree_header.setStyleSheet("font-weight: bold; padding: 5px; background: #f4e8e8;")
+        layout.addWidget(self.page_tree_header)
+
+        # Tree widget
+        self.page_tree = QTreeWidget()
+        self.page_tree.setHeaderLabels(["Pages & Paragraphs"])
+        self.page_tree.setAlternatingRowColors(True)
+
+        # Set tree font
+        font = QFont("Arial", 10)
+        self.page_tree.setFont(font)
+
+        # Connect click signal to highlight paragraph in editor
+        self.page_tree.itemClicked.connect(self._on_tree_item_clicked)
+
+        layout.addWidget(self.page_tree)
 
         return panel
 
@@ -136,15 +175,15 @@ class MainWindow(QMainWindow):
         self._updating = True
         try:
             self._parse_paragraphs()
-            self._update_tree()
+            self._calculate_pages()
+            self._update_section_tree()
+            self._update_page_tree()
         finally:
             self._updating = False
 
     def _parse_paragraphs(self):
         """Parse the editor text into paragraphs (each line = one paragraph)."""
         text = self.text_editor.toPlainText()
-
-        # Split by ANY newline - each line of content is a paragraph
         lines = text.split("\n")
 
         # Remember old section assignments before clearing
@@ -172,33 +211,58 @@ class MainWindow(QMainWindow):
         # Re-apply section assignments (adjust for paragraph count changes)
         new_section_starts = {}
         for old_para_num, section in old_sections.items():
-            # Keep section if paragraph still exists
             if old_para_num <= len(self.document.paragraphs):
                 new_section_starts[old_para_num] = section
         self._section_starts = new_section_starts
 
-    def _update_tree(self):
-        """Update the tree widget with current paragraphs grouped by sections."""
-        self.tree_widget.clear()
+    def _calculate_pages(self):
+        """Calculate which paragraphs go on which page."""
+        self._page_assignments.clear()
+
+        if not self.document.paragraphs:
+            return
+
+        current_page = 1
+        current_line_count = 0
+        self._page_assignments[current_page] = []
+
+        for para_num in sorted(self.document.paragraphs.keys()):
+            para = self.document.paragraphs[para_num]
+
+            # Calculate lines this paragraph takes (double-spaced)
+            # Each paragraph = ceil(len(text) / CHARS_PER_LINE) lines * 2 (double-spaced) + 1 (spacing)
+            text_lines = max(1, (len(para.text) + self.CHARS_PER_LINE - 1) // self.CHARS_PER_LINE)
+            para_lines = text_lines * 2 + 1  # Double-spaced + spacing between paragraphs
+
+            # Check if we need a new page
+            if current_line_count + para_lines > self.LINES_PER_PAGE and current_line_count > 0:
+                current_page += 1
+                current_line_count = 0
+                self._page_assignments[current_page] = []
+
+            # Add paragraph to current page
+            self._page_assignments[current_page].append(para_num)
+            current_line_count += para_lines
+
+            # Check if section header needs extra space
+            if para_num in self._section_starts:
+                current_line_count += 2  # Extra space for section header
+
+    def _update_section_tree(self):
+        """Update the section tree widget with current paragraphs grouped by sections."""
+        self.section_tree.clear()
 
         count = len(self.document.paragraphs)
         section_count = len(self._section_starts)
-        self.tree_header.setText(
-            f"Paragraph Structure ({count} paragraph{'s' if count != 1 else ''}, "
-            f"{section_count} section{'s' if section_count != 1 else ''})"
+        self.section_tree_header.setText(
+            f"Section Tree ({count} para, {section_count} sec)"
         )
 
         if not self.document.paragraphs:
             return
 
-        # Sort paragraph numbers
         para_nums = sorted(self.document.paragraphs.keys())
-
-        # Find which paragraphs start sections
-        section_start_paras = sorted(self._section_starts.keys())
-
         current_section_item = None
-        current_section_start = None
 
         for para_num in para_nums:
             para = self.document.paragraphs[para_num]
@@ -211,30 +275,63 @@ class MainWindow(QMainWindow):
                 current_section_item = QTreeWidgetItem([section_text])
                 current_section_item.setData(0, Qt.ItemDataRole.UserRole, ("section", para_num))
 
-                # Make section headers bold
                 font = current_section_item.font(0)
                 font.setBold(True)
                 current_section_item.setFont(0, font)
 
-                self.tree_widget.addTopLevelItem(current_section_item)
+                self.section_tree.addTopLevelItem(current_section_item)
                 current_section_item.setExpanded(True)
-                current_section_start = para_num
 
             # Create paragraph item
-            preview = para.get_display_text(50)
+            preview = para.get_display_text(40)
             para_text = f"{para.number}. {preview}"
             para_item = QTreeWidgetItem([para_text])
             para_item.setData(0, Qt.ItemDataRole.UserRole, ("para", para_num))
 
-            # Add to section or top level
             if current_section_item is not None:
                 current_section_item.addChild(para_item)
             else:
-                self.tree_widget.addTopLevelItem(para_item)
+                self.section_tree.addTopLevelItem(para_item)
 
-    def _on_tree_context_menu(self, position):
-        """Show context menu on right-click."""
-        item = self.tree_widget.itemAt(position)
+    def _update_page_tree(self):
+        """Update the page tree widget with paragraphs grouped by page."""
+        self.page_tree.clear()
+
+        page_count = len(self._page_assignments)
+        self.page_tree_header.setText(f"Page Tree ({page_count} page{'s' if page_count != 1 else ''})")
+
+        if not self._page_assignments:
+            return
+
+        for page_num in sorted(self._page_assignments.keys()):
+            para_nums = self._page_assignments[page_num]
+
+            # Create page item
+            page_text = f"Page {page_num}"
+            page_item = QTreeWidgetItem([page_text])
+            page_item.setData(0, Qt.ItemDataRole.UserRole, ("page", page_num))
+
+            font = page_item.font(0)
+            font.setBold(True)
+            page_item.setFont(0, font)
+
+            self.page_tree.addTopLevelItem(page_item)
+
+            # Add paragraphs under this page
+            for para_num in para_nums:
+                para = self.document.paragraphs.get(para_num)
+                if para:
+                    preview = para.get_display_text(40)
+                    para_text = f"{para.number}. {preview}"
+                    para_item = QTreeWidgetItem([para_text])
+                    para_item.setData(0, Qt.ItemDataRole.UserRole, ("para", para_num))
+                    page_item.addChild(para_item)
+
+            page_item.setExpanded(True)
+
+    def _on_section_tree_context_menu(self, position):
+        """Show context menu on right-click in section tree."""
+        item = self.section_tree.itemAt(position)
         if not item:
             return
 
@@ -247,17 +344,12 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
 
         if item_type == "para":
-            # Right-clicked on a paragraph
             para_num = item_id
-
-            # Section submenu
             section_menu = menu.addMenu("Section")
 
-            # Option to create new section
             new_section_action = section_menu.addAction("Create new section...")
             new_section_action.triggered.connect(lambda: self._create_section_at(para_num))
 
-            # List existing sections to assign to
             if self._section_starts:
                 section_menu.addSeparator()
                 for start_para, section in sorted(self._section_starts.items()):
@@ -266,29 +358,24 @@ class MainWindow(QMainWindow):
                         lambda checked, s=section, p=para_num: self._assign_to_section(p, s)
                     )
 
-            # Option to remove from section (if in a section)
             if self._get_section_for_para(para_num):
                 section_menu.addSeparator()
                 remove_action = section_menu.addAction("Remove from section")
                 remove_action.triggered.connect(lambda: self._remove_from_section(para_num))
 
         elif item_type == "section":
-            # Right-clicked on a section header
             section_start_para = item_id
 
-            # Option to remove section
             remove_action = menu.addAction("Remove section")
             remove_action.triggered.connect(lambda: self._remove_section(section_start_para))
 
-            # Option to rename section
             rename_action = menu.addAction("Rename section...")
             rename_action.triggered.connect(lambda: self._rename_section(section_start_para))
 
-        menu.exec(self.tree_widget.viewport().mapToGlobal(position))
+        menu.exec(self.section_tree.viewport().mapToGlobal(position))
 
     def _create_section_at(self, para_num: int):
         """Create a new section starting at the given paragraph."""
-        # Ask for section name
         name, ok = QInputDialog.getText(
             self, "Create Section",
             "Section name (e.g., PARTIES, JURISDICTION):"
@@ -298,7 +385,6 @@ class MainWindow(QMainWindow):
 
         name = name.strip().upper()
 
-        # Determine Roman numeral
         existing_numerals = [s.id for s in self._section_starts.values()]
         for numeral in self.ROMAN_NUMERALS:
             if numeral not in existing_numerals:
@@ -306,16 +392,15 @@ class MainWindow(QMainWindow):
         else:
             numeral = f"S{len(self._section_starts) + 1}"
 
-        # Create section
         section = Section(id=numeral, title=name)
         self._section_starts[para_num] = section
 
-        # Update tree
-        self._update_tree()
+        self._calculate_pages()
+        self._update_section_tree()
+        self._update_page_tree()
 
     def _assign_to_section(self, para_num: int, section: Section):
         """Move section to start at a different paragraph."""
-        # Find current start of this section
         current_start = None
         for start_para, s in self._section_starts.items():
             if s.id == section.id:
@@ -326,19 +411,25 @@ class MainWindow(QMainWindow):
             del self._section_starts[current_start]
 
         self._section_starts[para_num] = section
-        self._update_tree()
+        self._calculate_pages()
+        self._update_section_tree()
+        self._update_page_tree()
 
     def _remove_from_section(self, para_num: int):
         """Remove section that starts at this paragraph."""
         if para_num in self._section_starts:
             del self._section_starts[para_num]
-            self._update_tree()
+            self._calculate_pages()
+            self._update_section_tree()
+            self._update_page_tree()
 
     def _remove_section(self, section_start_para: int):
         """Remove a section entirely."""
         if section_start_para in self._section_starts:
             del self._section_starts[section_start_para]
-            self._update_tree()
+            self._calculate_pages()
+            self._update_section_tree()
+            self._update_page_tree()
 
     def _rename_section(self, section_start_para: int):
         """Rename a section."""
@@ -353,11 +444,10 @@ class MainWindow(QMainWindow):
         )
         if ok and name.strip():
             section.title = name.strip().upper()
-            self._update_tree()
+            self._update_section_tree()
 
     def _get_section_for_para(self, para_num: int) -> Section | None:
         """Get the section that contains a paragraph."""
-        # Find the most recent section start before or at para_num
         relevant_starts = [p for p in self._section_starts.keys() if p <= para_num]
         if not relevant_starts:
             return None
@@ -371,7 +461,6 @@ class MainWindow(QMainWindow):
 
         item_type, item_id = item_data
 
-        # Only handle paragraph clicks, not section clicks
         if item_type != "para":
             return
 

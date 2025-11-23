@@ -122,22 +122,40 @@ Formarter is a Python GUI application designed for lawyers who file documents in
 
 ---
 
-### Iteration 4: Tree Interactions (Planned)
+### Iteration 4: Tree Interactions & Sections (COMPLETE)
 
-- [ ] Click tree item → highlight lines in editor
-- [ ] Click tree item → scroll to paragraph in editor
-- [ ] Collapsible sections and sub-items
-- [ ] Filter/search bar in tree
+**Goal:** Click-to-highlight, sections via right-click menu.
+
+**Status:** COMPLETE
+- [x] Click tree item → highlight paragraph in editor
+- [x] Click tree item → scroll to and select paragraph text
+- [x] Create sections via right-click (Roman numerals I, II, III...)
+- [x] Assign paragraphs to existing sections
+- [x] Remove/rename sections via context menu
+- [x] Sections display as parent nodes with paragraphs as children
 
 ---
 
-### Iteration 5: Sections & Sub-items (Planned)
+### Iteration 4.5: Page Tree (COMPLETE)
 
-- [ ] Add sections via right-click (I. II. III.)
+**Goal:** Add third panel showing paragraphs grouped by calculated page number.
+
+**Status:** COMPLETE
+- [x] Three-panel layout: Editor | Section Tree | Page Tree
+- [x] Auto-calculate page breaks based on federal court formatting
+- [x] 25 lines per page, 65 characters per line, double-spaced
+- [x] Page Tree shows "Page 1", "Page 2", etc. with paragraphs as children
+- [x] Click paragraph in Page Tree → highlight in editor
+- [x] Color-coded panel headers (green, blue, red)
+
+---
+
+### Iteration 5: Sub-items & Drag-Drop (Planned)
+
 - [ ] Add sub-items via right-click (a. b. c.)
-- [ ] Assign paragraphs to sections
 - [ ] Drag-drop reordering of paragraphs
 - [ ] Auto-renumber paragraphs after reorder
+- [ ] Filter/search bar in tree
 
 ---
 
