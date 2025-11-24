@@ -154,9 +154,12 @@ def _get_styles(font_name: str) -> dict:
 
 
 def _add_page_number(canvas, doc):
-    """Add page number to center bottom of each page."""
-    canvas.saveState()
+    """Add page number to center bottom of each page (skip first page per federal court rules)."""
     page_num = canvas.getPageNumber()
+    # Federal court rule: first page is not numbered, second page shows "2", etc.
+    if page_num == 1:
+        return  # No page number on first page
+    canvas.saveState()
     text = f"{page_num}"
     canvas.setFont('Times-Roman', 12)
     canvas.drawCentredString(PAGE_WIDTH / 2, 0.5 * inch, text)
@@ -248,11 +251,19 @@ def _build_caption(caption, font_name: str, document_title: str = "") -> list:
     # Table data
     table_data = []
 
-    # Row 1: Plaintiff name on left, "Plaintiff," label on right
+    # Determine if plural (multiple plaintiffs/defendants)
+    # Check for comma or "et al." to detect multiple parties
+    is_plural_plaintiff = "," in plaintiff_text or "ET AL" in plaintiff_text
+    is_plural_defendant = "," in defendant_text or "ET AL" in defendant_text
+
+    plaintiff_label = "Plaintiffs," if is_plural_plaintiff else "Plaintiff,"
+    defendant_label = "Defendants." if is_plural_defendant else "Defendant."
+
+    # Row 1: Plaintiff name on left, "Plaintiff(s)," label on right
     if plaintiff_text:
         table_data.append([
             Paragraph(plaintiff_text + ",", party_style),
-            Paragraph("Plaintiff,", label_style)
+            Paragraph(plaintiff_label, label_style)
         ])
 
     # Row 2: v.
@@ -261,11 +272,11 @@ def _build_caption(caption, font_name: str, document_title: str = "") -> list:
         ""
     ])
 
-    # Row 3: Defendant name on left, "Defendant." label on right
+    # Row 3: Defendant name on left, "Defendant(s)." label on right
     if defendant_text:
         table_data.append([
             Paragraph(defendant_text + ",", party_style),
-            Paragraph("Defendant.", label_style)
+            Paragraph(defendant_label, label_style)
         ])
 
     if table_data:
@@ -443,7 +454,7 @@ def _build_signature_and_certificate(signature, font_name: str) -> list:
             elements.append(Paragraph(signature.address, sig_style_center))
 
     # Certificate of Service (no signatures needed below)
-    elements.append(Spacer(1, LINE_SPACING * 2))
+    elements.append(Spacer(1, LINE_SPACING))  # Single line before certificate
     elements.append(Paragraph("<b>CERTIFICATE OF SERVICE</b>", cert_header_style))
 
     cert_text = "I hereby certify that all counsel of record were served via ECF at the time of filing."

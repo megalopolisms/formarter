@@ -139,6 +139,9 @@ class MainWindow(QMainWindow):
         # Auto-select case 178 (first case profile) by default
         self.case_dropdown.setCurrentIndex(1)  # Index 1 = "178 - Petrini & Maeda v. Biloxi"
 
+        # Auto-select MOTION as default document type
+        self.doc_type_dropdown.setCurrentIndex(1)  # Index 1 = "MOTION"
+
     def _setup_ui(self):
         """Set up the main user interface with toolbar and 3 panels."""
         # Create main container
