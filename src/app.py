@@ -5,7 +5,7 @@ Main application window for Formarter.
 import subprocess
 import sys
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -32,12 +32,18 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QLineEdit,
     QComboBox,
+    QListWidget,
+    QListWidgetItem,
+    QFrame,
+    QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage
+from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage, QIcon
 
 from .models import Document, Paragraph, Section, SpacingSettings, CaseCaption, SignatureBlock, CaseProfile
+from .models.saved_document import SavedDocument
 from .pdf_export import generate_pdf
+from .storage import DocumentStorage
 
 
 class MainWindow(QMainWindow):
@@ -111,7 +117,13 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Formarter - Federal Court Document Formatter")
-        self.setMinimumSize(1200, 600)
+        self.setMinimumSize(1400, 600)
+
+        # Initialize storage manager
+        self.storage = DocumentStorage()
+
+        # Currently loaded document (None = new unsaved document)
+        self._current_saved_doc: SavedDocument | None = None
 
         # Start with empty document
         self.document = Document(title="New Document")
@@ -131,6 +143,9 @@ class MainWindow(QMainWindow):
         # Flag to prevent recursive updates
         self._updating = False
 
+        # Flag for sidebar visibility
+        self._sidebar_visible = True
+
         self._setup_ui()
 
         # Set initial filing date from the date input
@@ -142,8 +157,11 @@ class MainWindow(QMainWindow):
         # Auto-select MOTION as default document type
         self.doc_type_dropdown.setCurrentIndex(1)  # Index 1 = "MOTION"
 
+        # Load saved documents list
+        self._refresh_document_list()
+
     def _setup_ui(self):
-        """Set up the main user interface with toolbar and 3 panels."""
+        """Set up the main user interface with toolbar, sidebar, and 3 panels."""
         # Create main container
         main_widget = QWidget()
         main_layout = QVBoxLayout(main_widget)
@@ -154,25 +172,29 @@ class MainWindow(QMainWindow):
         toolbar = self._create_toolbar()
         main_layout.addWidget(toolbar)
 
-        # Create the main splitter for three-panel layout
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Create main splitter that includes sidebar + content panels
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Create collapsible sidebar panel (saved documents)
+        self.sidebar = self._create_sidebar_panel()
+        self.main_splitter.addWidget(self.sidebar)
 
         # Left panel: Text Editor
         left_panel = self._create_editor_panel()
-        splitter.addWidget(left_panel)
+        self.main_splitter.addWidget(left_panel)
 
         # Middle panel: Section Tree
         middle_panel = self._create_section_tree_panel()
-        splitter.addWidget(middle_panel)
+        self.main_splitter.addWidget(middle_panel)
 
         # Right panel: Page Tree
         right_panel = self._create_page_tree_panel()
-        splitter.addWidget(right_panel)
+        self.main_splitter.addWidget(right_panel)
 
-        # Set initial sizes (40/30/30 split)
-        splitter.setSizes([400, 300, 300])
+        # Set initial sizes (sidebar/editor/sections/pages)
+        self.main_splitter.setSizes([220, 400, 300, 300])
 
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self.main_splitter)
 
         # Set main widget as central widget
         self.setCentralWidget(main_widget)
@@ -184,6 +206,26 @@ class MainWindow(QMainWindow):
         toolbar.setStyleSheet("background: #f0f0f0; border-bottom: 1px solid #ccc;")
         layout = QHBoxLayout(toolbar)
         layout.setContentsMargins(5, 2, 5, 2)
+
+        # Sidebar toggle button
+        self.sidebar_toggle_btn = QPushButton("<<")
+        self.sidebar_toggle_btn.setFixedWidth(30)
+        self.sidebar_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background: #e0e0e0;
+                border: 1px solid #ccc;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #d0d0d0;
+            }
+        """)
+        self.sidebar_toggle_btn.setToolTip("Toggle sidebar")
+        self.sidebar_toggle_btn.clicked.connect(self._toggle_sidebar)
+        layout.addWidget(self.sidebar_toggle_btn)
+
+        layout.addSpacing(5)
 
         # Case profile dropdown
         case_label = QLabel("Case:")
@@ -326,9 +368,9 @@ class MainWindow(QMainWindow):
         self.date_input = QLineEdit()
         self.date_input.setFixedWidth(100)
         self.date_input.setPlaceholderText("MM/DD/YYYY")
-        # Set today's date as default
-        today = date.today()
-        self.date_input.setText(today.strftime("%m/%d/%Y"))
+        # Set next business day as default (skip weekends)
+        filing_date = self._get_next_business_day(date.today())
+        self.date_input.setText(filing_date.strftime("%m/%d/%Y"))
         self.date_input.textChanged.connect(self._on_date_changed)
         layout.addWidget(self.date_input)
 
@@ -427,6 +469,449 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.page_tree)
 
         return panel
+
+    def _create_sidebar_panel(self) -> QWidget:
+        """Create the collapsible sidebar panel with saved documents."""
+        panel = QFrame()
+        panel.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Sunken)
+        panel.setMinimumWidth(150)
+        panel.setMaximumWidth(400)
+        panel.setStyleSheet("""
+            QFrame {
+                background: #f8f8f8;
+                border-right: 1px solid #ccc;
+            }
+        """)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        # Header
+        header = QLabel("Saved Documents")
+        header.setStyleSheet("font-weight: bold; font-size: 12px; padding: 5px;")
+        layout.addWidget(header)
+
+        # Storage location indicator
+        storage_path = self.storage.get_storage_location()
+        # Show only the folder name, not full path
+        folder_name = Path(storage_path).name
+        is_dropbox = "Dropbox" in storage_path
+        storage_label = QLabel(f"{'Dropbox' if is_dropbox else 'Local'}: {folder_name}")
+        storage_label.setStyleSheet("font-size: 10px; color: #666; padding: 2px 5px;")
+        storage_label.setToolTip(storage_path)
+        layout.addWidget(storage_label)
+
+        # New document button
+        new_btn = QPushButton("+ New Document")
+        new_btn.setStyleSheet("""
+            QPushButton {
+                background: #28a745;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #218838;
+            }
+        """)
+        new_btn.clicked.connect(self._on_new_document)
+        layout.addWidget(new_btn)
+
+        # Save current button
+        save_btn = QPushButton("Save Current")
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background: #007bff;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #0069d9;
+            }
+        """)
+        save_btn.clicked.connect(self._on_save_document)
+        layout.addWidget(save_btn)
+
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setStyleSheet("background: #ccc;")
+        layout.addWidget(separator)
+
+        # Document list
+        self.doc_list = QListWidget()
+        self.doc_list.setStyleSheet("""
+            QListWidget {
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #eee;
+            }
+            QListWidget::item:selected {
+                background: #e3f2fd;
+                color: black;
+            }
+            QListWidget::item:hover {
+                background: #f5f5f5;
+            }
+        """)
+        self.doc_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.doc_list.customContextMenuRequested.connect(self._on_doc_list_context_menu)
+        self.doc_list.itemDoubleClicked.connect(self._on_doc_list_double_click)
+        layout.addWidget(self.doc_list)
+
+        return panel
+
+    def _toggle_sidebar(self):
+        """Toggle sidebar visibility."""
+        self._sidebar_visible = not self._sidebar_visible
+        if self._sidebar_visible:
+            # Show sidebar with default width
+            sizes = self.main_splitter.sizes()
+            sizes[0] = 220
+            self.main_splitter.setSizes(sizes)
+        else:
+            # Collapse sidebar to 0
+            sizes = self.main_splitter.sizes()
+            sizes[0] = 0
+            self.main_splitter.setSizes(sizes)
+        self.sidebar_toggle_btn.setText("<<" if self._sidebar_visible else ">>")
+
+    def _get_case_name(self, case_profile_index: int) -> str:
+        """Get short case name from profile index."""
+        if case_profile_index <= 0 or case_profile_index > len(self.CASE_PROFILES):
+            return "None"
+        profile = self.CASE_PROFILES[case_profile_index - 1]
+        # Extract case number (e.g., "178" from "178 - Petrini & Maeda v. Biloxi")
+        return profile.name.split(" - ")[0]
+
+    def _get_next_business_day(self, d: date) -> date:
+        """
+        Get the next business day (skip weekends).
+
+        If the given date is a weekend (Saturday or Sunday),
+        returns the following Monday.
+        """
+        # weekday(): Monday=0, Tuesday=1, ..., Saturday=5, Sunday=6
+        while d.weekday() >= 5:  # 5=Saturday, 6=Sunday
+            d += timedelta(days=1)
+        return d
+
+    def _refresh_document_list(self):
+        """Refresh the document list from storage."""
+        self.doc_list.clear()
+        documents = self.storage.list_all()
+
+        for doc in documents:
+            item = QListWidgetItem()
+
+            # Show full details for each document
+            case_name = self._get_case_name(doc.case_profile_index)
+            display_text = (
+                f"{doc.name}\n"
+                f"Case: {case_name}\n"
+                f"Created: {doc.created_display}\n"
+                f"Modified: {doc.modified_display}"
+            )
+
+            item.setText(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, doc.id)
+
+            # Highlight current document
+            if self._current_saved_doc and doc.id == self._current_saved_doc.id:
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+
+            self.doc_list.addItem(item)
+
+    def _on_new_document(self):
+        """Create a new document and save it immediately."""
+        # Check if current document has unsaved changes
+        if self._has_unsaved_changes():
+            result = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "Do you want to save the current document before creating a new one?",
+                QMessageBox.StandardButton.Save |
+                QMessageBox.StandardButton.Discard |
+                QMessageBox.StandardButton.Cancel
+            )
+            if result == QMessageBox.StandardButton.Save:
+                self._on_save_document()
+            elif result == QMessageBox.StandardButton.Cancel:
+                return
+
+        # Clear editor and reset state
+        self._updating = True
+        try:
+            self.text_editor.clear()
+            self._section_starts.clear()
+            self.document = Document(title="New Document")
+
+            # Reset to defaults
+            self.case_dropdown.setCurrentIndex(1)
+            self.doc_type_dropdown.setCurrentIndex(1)
+            self.document.signature.filing_date = self.date_input.text()
+            self._on_case_selected(1)
+
+            self._parse_paragraphs()
+            self._calculate_pages()
+            self._update_section_tree()
+            self._update_page_tree()
+            self._update_doc_info()
+        finally:
+            self._updating = False
+
+        # Create and save new document immediately
+        new_doc = SavedDocument(name="Untitled Document")
+        self._save_current_to_doc(new_doc)
+        self.storage.save(new_doc)
+        self._current_saved_doc = new_doc
+
+        self._refresh_document_list()
+
+    def _on_save_document(self):
+        """Save the current document."""
+        if self._current_saved_doc:
+            # Update existing document
+            self._save_current_to_doc(self._current_saved_doc)
+            self.storage.save(self._current_saved_doc)
+            # Reload the saved doc to get updated modified timestamp
+            self._current_saved_doc = self.storage.get_by_id(self._current_saved_doc.id)
+            QMessageBox.information(
+                self, "Saved",
+                f"Document '{self._current_saved_doc.name}' saved."
+            )
+        else:
+            # Create new document with name
+            name, ok = QInputDialog.getText(
+                self, "Save Document",
+                "Document name:",
+                text="Untitled Document"
+            )
+            if not ok or not name.strip():
+                return
+
+            new_doc = SavedDocument(name=name.strip())
+            self._save_current_to_doc(new_doc)
+            self.storage.save(new_doc)
+            # Reload to get the saved version with updated timestamp
+            self._current_saved_doc = self.storage.get_by_id(new_doc.id)
+            QMessageBox.information(
+                self, "Saved",
+                f"Document '{new_doc.name}' created."
+            )
+
+        self._refresh_document_list()
+
+    def _save_current_to_doc(self, doc: SavedDocument):
+        """Save current editor state to a SavedDocument."""
+        doc.text_content = self.text_editor.toPlainText()
+        doc.case_profile_index = self.case_dropdown.currentIndex()
+        doc.document_type_index = self.doc_type_dropdown.currentIndex()
+        doc.custom_title = self.custom_title_input.text()
+        doc.spacing_before_section = self._global_spacing.before_section
+        doc.spacing_after_section = self._global_spacing.after_section
+        doc.spacing_between_paragraphs = self._global_spacing.between_paragraphs
+        doc.filing_date = self.date_input.text()
+
+        # Save section assignments
+        doc.sections = []
+        for para_num, section in self._section_starts.items():
+            section_data = {
+                "id": section.id,
+                "title": section.title,
+                "start_para": para_num,
+            }
+            if section.custom_spacing:
+                section_data["custom_spacing"] = {
+                    "before_section": section.custom_spacing.before_section,
+                    "after_section": section.custom_spacing.after_section,
+                    "between_paragraphs": section.custom_spacing.between_paragraphs,
+                }
+            doc.sections.append(section_data)
+
+    def _load_doc_to_editor(self, doc: SavedDocument):
+        """Load a SavedDocument into the editor."""
+        self._updating = True
+        try:
+            # Set text content
+            self.text_editor.setPlainText(doc.text_content)
+
+            # Set dropdowns
+            self.case_dropdown.setCurrentIndex(doc.case_profile_index)
+            self.doc_type_dropdown.setCurrentIndex(doc.document_type_index)
+            self.custom_title_input.setText(doc.custom_title)
+            self.date_input.setText(doc.filing_date)
+
+            # Apply case profile if selected
+            if doc.case_profile_index > 0:
+                self._on_case_selected(doc.case_profile_index)
+
+            # Apply document type
+            self._on_doc_type_selected(doc.document_type_index)
+
+            # Set global spacing
+            self._global_spacing = SpacingSettings(
+                before_section=doc.spacing_before_section,
+                after_section=doc.spacing_after_section,
+                between_paragraphs=doc.spacing_between_paragraphs,
+            )
+
+            # Restore section assignments
+            self._section_starts.clear()
+            for section_data in doc.sections:
+                section = Section(
+                    id=section_data["id"],
+                    title=section_data["title"]
+                )
+                if "custom_spacing" in section_data:
+                    cs = section_data["custom_spacing"]
+                    section.custom_spacing = SpacingSettings(
+                        before_section=cs["before_section"],
+                        after_section=cs["after_section"],
+                        between_paragraphs=cs["between_paragraphs"],
+                    )
+                self._section_starts[section_data["start_para"]] = section
+
+            # Update current document reference
+            self._current_saved_doc = doc
+
+            # Refresh UI
+            self._parse_paragraphs()
+            self._calculate_pages()
+            self._update_section_tree()
+            self._update_page_tree()
+            self._update_doc_info()
+        finally:
+            self._updating = False
+
+    def _has_unsaved_changes(self) -> bool:
+        """Check if current editor has unsaved changes."""
+        current_text = self.text_editor.toPlainText()
+        if self._current_saved_doc:
+            return current_text != self._current_saved_doc.text_content
+        else:
+            return len(current_text.strip()) > 0
+
+    def _on_doc_list_context_menu(self, position):
+        """Show context menu for document list."""
+        item = self.doc_list.itemAt(position)
+        if not item:
+            return
+
+        doc_id = item.data(Qt.ItemDataRole.UserRole)
+
+        menu = QMenu(self)
+
+        # Load action
+        load_action = menu.addAction("Open")
+        load_action.triggered.connect(lambda: self._load_document(doc_id))
+
+        menu.addSeparator()
+
+        # Rename action
+        rename_action = menu.addAction("Rename...")
+        rename_action.triggered.connect(lambda: self._rename_document(doc_id))
+
+        # Duplicate action
+        duplicate_action = menu.addAction("Duplicate")
+        duplicate_action.triggered.connect(lambda: self._duplicate_document(doc_id))
+
+        menu.addSeparator()
+
+        # Delete action
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(lambda: self._delete_document(doc_id))
+
+        menu.exec(self.doc_list.viewport().mapToGlobal(position))
+
+    def _on_doc_list_double_click(self, item: QListWidgetItem):
+        """Handle double-click on document list item."""
+        doc_id = item.data(Qt.ItemDataRole.UserRole)
+        self._load_document(doc_id)
+
+    def _load_document(self, doc_id: str):
+        """Load a document by ID."""
+        # Check for unsaved changes
+        if self._has_unsaved_changes():
+            result = QMessageBox.question(
+                self,
+                "Unsaved Changes",
+                "Do you want to save the current document before loading another?",
+                QMessageBox.StandardButton.Save |
+                QMessageBox.StandardButton.Discard |
+                QMessageBox.StandardButton.Cancel
+            )
+            if result == QMessageBox.StandardButton.Save:
+                self._on_save_document()
+            elif result == QMessageBox.StandardButton.Cancel:
+                return
+
+        doc = self.storage.get_by_id(doc_id)
+        if doc:
+            self._load_doc_to_editor(doc)
+            self._refresh_document_list()
+
+    def _rename_document(self, doc_id: str):
+        """Rename a document."""
+        doc = self.storage.get_by_id(doc_id)
+        if not doc:
+            return
+
+        name, ok = QInputDialog.getText(
+            self, "Rename Document",
+            "New name:",
+            text=doc.name
+        )
+        if ok and name.strip():
+            self.storage.rename(doc_id, name.strip())
+            if self._current_saved_doc and self._current_saved_doc.id == doc_id:
+                self._current_saved_doc.name = name.strip()
+            self._refresh_document_list()
+
+    def _duplicate_document(self, doc_id: str):
+        """Duplicate a document."""
+        doc = self.storage.get_by_id(doc_id)
+        if not doc:
+            return
+
+        new_doc = self.storage.duplicate(doc_id)
+        if new_doc:
+            self._refresh_document_list()
+            QMessageBox.information(
+                self, "Duplicated",
+                f"Created copy: '{new_doc.name}'"
+            )
+
+    def _delete_document(self, doc_id: str):
+        """Delete a document."""
+        doc = self.storage.get_by_id(doc_id)
+        if not doc:
+            return
+
+        result = QMessageBox.question(
+            self,
+            "Delete Document",
+            f"Are you sure you want to delete '{doc.name}'?\n\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if result == QMessageBox.StandardButton.Yes:
+            self.storage.delete(doc_id)
+            if self._current_saved_doc and self._current_saved_doc.id == doc_id:
+                self._current_saved_doc = None
+            self._refresh_document_list()
 
     def _on_text_changed(self):
         """Handle text changes - detect paragraphs in real-time."""
