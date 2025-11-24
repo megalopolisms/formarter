@@ -36,6 +36,8 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QFrame,
     QSizePolicy,
+    QTabWidget,
+    QApplication,
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage, QIcon
@@ -44,6 +46,7 @@ from .models import Document, Paragraph, Section, SpacingSettings, CaseCaption, 
 from .models.saved_document import SavedDocument
 from .pdf_export import generate_pdf
 from .storage import DocumentStorage
+from .case_law_extractor import CaseLawExtractor
 
 
 class MainWindow(QMainWindow):
@@ -90,7 +93,7 @@ class MainWindow(QMainWindow):
             caption=CaseCaption(
                 plaintiff="YURI PETRINI, SUMIRE MAEDA",
                 defendant="CITY OF BILOXI, MISSISSIPPI, et al.",
-                case_number="1:25-cv-00178",
+                case_number="1:25-cv-00178-LG-RPM",
             ),
             signature=PETRINI_MAEDA_SIGNATURE,
         ),
@@ -99,7 +102,7 @@ class MainWindow(QMainWindow):
             caption=CaseCaption(
                 plaintiff="YURI PETRINI, SUMIRE MAEDA",
                 defendant="CITY OF BILOXI, MISSISSIPPI, et al.",
-                case_number="1:25-cv-00233",
+                case_number="1:25-cv-00233-LG-RPM",
             ),
             signature=PETRINI_MAEDA_SIGNATURE,
         ),
@@ -108,7 +111,7 @@ class MainWindow(QMainWindow):
             caption=CaseCaption(
                 plaintiff="YURI PETRINI",
                 defendant="CITY OF BILOXI, MISSISSIPPI, et al.",
-                case_number="1:25-cv-00254",
+                case_number="1:25-cv-00254-LG-RPM",
             ),
             signature=PETRINI_SIGNATURE,
         ),
@@ -161,16 +164,59 @@ class MainWindow(QMainWindow):
         self._refresh_document_list()
 
     def _setup_ui(self):
-        """Set up the main user interface with toolbar, sidebar, and 3 panels."""
+        """Set up the main user interface with tabs."""
         # Create main container
         main_widget = QWidget()
         main_layout = QVBoxLayout(main_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        # Create tab widget for browser-style tabs
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabPosition(QTabWidget.TabPosition.North)
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: none;
+            }
+            QTabBar::tab {
+                background: #e0e0e0;
+                padding: 8px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background: #ffffff;
+                font-weight: bold;
+            }
+            QTabBar::tab:hover {
+                background: #f0f0f0;
+            }
+        """)
+
+        # Tab 1: Editor (main document editor)
+        editor_tab = self._create_editor_tab()
+        self.tab_widget.addTab(editor_tab, "Editor")
+
+        # Tab 2: Case Law Extractor
+        case_law_tab = self._create_case_law_tab()
+        self.tab_widget.addTab(case_law_tab, "Case Law")
+
+        main_layout.addWidget(self.tab_widget)
+
+        # Set main widget as central widget
+        self.setCentralWidget(main_widget)
+
+    def _create_editor_tab(self) -> QWidget:
+        """Create the Editor tab with toolbar, sidebar, and panels."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
         # Create toolbar
         toolbar = self._create_toolbar()
-        main_layout.addWidget(toolbar)
+        layout.addWidget(toolbar)
 
         # Create main splitter that includes sidebar + content panels
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -194,10 +240,178 @@ class MainWindow(QMainWindow):
         # Set initial sizes (sidebar/editor/sections/pages)
         self.main_splitter.setSizes([220, 400, 300, 300])
 
-        main_layout.addWidget(self.main_splitter)
+        layout.addWidget(self.main_splitter)
 
-        # Set main widget as central widget
-        self.setCentralWidget(main_widget)
+        return tab
+
+    def _create_case_law_tab(self) -> QWidget:
+        """Create the Case Law Extractor tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Header
+        header = QLabel("Case Law Citation Extractor")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        layout.addWidget(header)
+
+        description = QLabel(
+            "Select a saved document to extract all case law citations. "
+            "The extractor identifies federal and state case citations, "
+            "including short citations (Id., supra, infra)."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet("color: #666; margin-bottom: 10px;")
+        layout.addWidget(description)
+
+        # Document selector
+        selector_layout = QHBoxLayout()
+
+        doc_label = QLabel("Select Document:")
+        doc_label.setStyleSheet("font-weight: bold;")
+        selector_layout.addWidget(doc_label)
+
+        self.case_law_doc_dropdown = QComboBox()
+        self.case_law_doc_dropdown.setMinimumWidth(300)
+        self._refresh_case_law_doc_list()
+        selector_layout.addWidget(self.case_law_doc_dropdown)
+
+        selector_layout.addStretch()
+
+        layout.addLayout(selector_layout)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+
+        extract_btn = QPushButton("Extract Citations")
+        extract_btn.setStyleSheet("""
+            QPushButton {
+                background: #4a90d9;
+                color: white;
+                border: none;
+                padding: 10px 25px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: #357abd;
+            }
+        """)
+        extract_btn.clicked.connect(self._on_extract_citations)
+        btn_layout.addWidget(extract_btn)
+
+        copy_btn = QPushButton("Copy Report")
+        copy_btn.setStyleSheet("""
+            QPushButton {
+                background: #6c757d;
+                color: white;
+                border: none;
+                padding: 10px 25px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: #5a6268;
+            }
+        """)
+        copy_btn.clicked.connect(self._on_copy_report)
+        btn_layout.addWidget(copy_btn)
+
+        btn_layout.addStretch()
+
+        layout.addLayout(btn_layout)
+
+        # Results area
+        results_label = QLabel("Results:")
+        results_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(results_label)
+
+        self.case_law_results = QTextEdit()
+        self.case_law_results.setReadOnly(True)
+        self.case_law_results.setFont(QFont("Courier New", 11))
+        self.case_law_results.setStyleSheet("""
+            QTextEdit {
+                background: #f8f9fa;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                padding: 10px;
+            }
+        """)
+        self.case_law_results.setPlaceholderText("Select a document and click 'Extract Citations' to see results...")
+        layout.addWidget(self.case_law_results)
+
+        return tab
+
+    def _refresh_case_law_doc_list(self):
+        """Refresh the document dropdown in Case Law tab."""
+        self.case_law_doc_dropdown.clear()
+        self.case_law_doc_dropdown.addItem("-- Select a Document --", None)
+
+        documents = self.storage.list_all()
+        for doc in documents:
+            case_name = self._get_case_name(doc.case_profile_index)
+            display = f"{doc.name} (Case {case_name})"
+            self.case_law_doc_dropdown.addItem(display, doc.id)
+
+    def _on_extract_citations(self):
+        """Extract citations from selected document."""
+        doc_id = self.case_law_doc_dropdown.currentData()
+        if not doc_id:
+            QMessageBox.warning(
+                self, "No Document Selected",
+                "Please select a document to analyze."
+            )
+            return
+
+        doc = self.storage.get_by_id(doc_id)
+        if not doc:
+            QMessageBox.warning(
+                self, "Document Not Found",
+                "The selected document could not be found."
+            )
+            return
+
+        # Parse paragraphs from text content
+        paragraphs = {}
+        lines = doc.text_content.split("\n")
+        para_num = 1
+        for line in lines:
+            cleaned = line.strip()
+            if cleaned:
+                paragraphs[para_num] = cleaned
+                para_num += 1
+
+        if not paragraphs:
+            self.case_law_results.setPlainText("No paragraphs found in this document.")
+            return
+
+        # Extract citations
+        extractor = CaseLawExtractor()
+        results = extractor.extract_from_paragraphs(paragraphs)
+
+        # Generate report
+        report = extractor.generate_report(results)
+        self.case_law_results.setPlainText(report)
+
+    def _on_copy_report(self):
+        """Copy the case law report to clipboard."""
+        text = self.case_law_results.toPlainText()
+        if not text or text == self.case_law_results.placeholderText():
+            QMessageBox.information(
+                self, "Nothing to Copy",
+                "Extract citations first to generate a report."
+            )
+            return
+
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        QMessageBox.information(
+            self, "Copied",
+            "Report copied to clipboard."
+        )
 
     def _create_toolbar(self) -> QWidget:
         """Create toolbar with Preview and Export buttons."""
@@ -1313,10 +1527,14 @@ class MainWindow(QMainWindow):
         """Handle Preview button click - generate PDF and open in system viewer."""
         # Allow preview even without paragraphs (to see header and signature)
         try:
-            # Generate PDF to temp file
-            pdf_path = generate_pdf(
+            # Use a fixed preview path so Preview.app can refresh the same file
+            preview_path = Path(tempfile.gettempdir()) / "formarter_preview.pdf"
+
+            # Generate PDF to the fixed preview path
+            generate_pdf(
                 self.document.paragraphs,
                 self._section_starts,
+                output_path=str(preview_path),
                 global_spacing=self._global_spacing,
                 caption=self.document.caption,
                 signature=self.document.signature,
@@ -1325,11 +1543,13 @@ class MainWindow(QMainWindow):
 
             # Open in system PDF viewer (Preview.app on macOS)
             if sys.platform == "darwin":
-                subprocess.run(["open", pdf_path], check=True)
+                # Close any existing Preview windows showing our preview file
+                subprocess.run(["pkill", "-x", "Preview"], capture_output=True)
+                subprocess.run(["open", str(preview_path)], check=True)
             elif sys.platform == "win32":
-                subprocess.run(["start", "", pdf_path], shell=True, check=True)
+                subprocess.run(["start", "", str(preview_path)], shell=True, check=True)
             else:
-                subprocess.run(["xdg-open", pdf_path], check=True)
+                subprocess.run(["xdg-open", str(preview_path)], check=True)
 
         except Exception as e:
             QMessageBox.critical(

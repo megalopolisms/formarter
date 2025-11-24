@@ -11,6 +11,7 @@ Formatting per Mississippi District Court requirements:
 """
 
 import io
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -256,13 +257,18 @@ def _build_caption(caption, font_name: str, document_title: str = "") -> list:
     is_plural_plaintiff = "," in plaintiff_text or "ET AL" in plaintiff_text
     is_plural_defendant = "," in defendant_text or "ET AL" in defendant_text
 
-    plaintiff_label = "Plaintiffs," if is_plural_plaintiff else "Plaintiff,"
-    defendant_label = "Defendants." if is_plural_defendant else "Defendant."
+    plaintiff_label = "PLAINTIFFS" if is_plural_plaintiff else "PLAINTIFF"
+    defendant_label = "DEFENDANTS" if is_plural_defendant else "DEFENDANT"
 
-    # Row 1: Plaintiff name on left, "Plaintiff(s)," label on right
+    # Clean up "et al." formatting - remove comma before it, keep all caps
+    # ", ET AL" -> " ET AL." (all caps, no comma)
+    plaintiff_text = re.sub(r",?\s*ET\s*AL\.?", " ET AL.", plaintiff_text, flags=re.IGNORECASE)
+    defendant_text = re.sub(r",?\s*ET\s*AL\.?", " ET AL.", defendant_text, flags=re.IGNORECASE)
+
+    # Row 1: Plaintiff name on left, "Plaintiff(s)" label on right (no trailing punctuation)
     if plaintiff_text:
         table_data.append([
-            Paragraph(plaintiff_text + ",", party_style),
+            Paragraph(plaintiff_text, party_style),
             Paragraph(plaintiff_label, label_style)
         ])
 
@@ -272,10 +278,10 @@ def _build_caption(caption, font_name: str, document_title: str = "") -> list:
         ""
     ])
 
-    # Row 3: Defendant name on left, "Defendant(s)." label on right
+    # Row 3: Defendant name on left, "Defendant(s)" label on right (no trailing punctuation)
     if defendant_text:
         table_data.append([
-            Paragraph(defendant_text + ",", party_style),
+            Paragraph(defendant_text, party_style),
             Paragraph(defendant_label, label_style)
         ])
 
@@ -453,12 +459,18 @@ def _build_signature_and_certificate(signature, font_name: str) -> list:
         if signature.address:
             elements.append(Paragraph(signature.address, sig_style_center))
 
-    # Certificate of Service (no signatures needed below)
+    # Certificate of Service
     elements.append(Spacer(1, LINE_SPACING))  # Single line before certificate
     elements.append(Paragraph("<b>CERTIFICATE OF SERVICE</b>", cert_header_style))
 
     cert_text = "I hereby certify that all counsel of record were served via ECF at the time of filing."
     elements.append(Paragraph(cert_text, cert_body_style))
+
+    # Add signature line and name for certificate of service
+    elements.append(Spacer(1, SIG_SINGLE_SPACING * 2))  # Space for hand signature
+    elements.append(Paragraph("_________________________", sig_style_center))
+    if signature.attorney_name:
+        elements.append(Paragraph(f"<b>{signature.attorney_name}</b>", sig_style_center))
 
     # Wrap everything in KeepTogether so they stay on same page
     return [KeepTogether(elements)]
