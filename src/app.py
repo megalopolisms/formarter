@@ -5,6 +5,7 @@ Main application window for Formarter.
 import subprocess
 import sys
 import tempfile
+from datetime import date
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -57,14 +58,23 @@ class MainWindow(QMainWindow):
     LINES_PER_PAGE = 54  # Single-spaced equivalent lines (27 double-spaced * 2)
     CHARS_PER_LINE = 78  # ~6.5" width at 12 chars/inch for Times New Roman 12pt
 
-    # Shared signature block for all Petrini cases
+    # Dual signature block for Yuri & Sumire cases (178, 233)
+    PETRINI_MAEDA_SIGNATURE = SignatureBlock(
+        attorney_name="Yuri Petrini",
+        phone="(305) 504-1323",
+        email="yuri@megalopolisms.com",
+        attorney_name_2="Sumire Maeda",
+        phone_2="(305) 504-1323",
+        email_2="sumire@megalopolisms.com",
+        address="929 Division Street, Biloxi, MS 39530",
+    )
+
+    # Single signature block for Yuri only case (254)
     PETRINI_SIGNATURE = SignatureBlock(
         attorney_name="Yuri Petrini",
-        bar_number="",
-        firm_name="",
-        address="929 Division Street, Biloxi, MS 39530",
         phone="(305) 504-1323",
-        email="yuri@megalopolisms.com, sumire@megalopolisms.com",
+        email="yuri@megalopolisms.com",
+        address="929 Division Street, Biloxi, MS 39530",
     )
 
     # Pre-configured case profiles
@@ -72,20 +82,20 @@ class MainWindow(QMainWindow):
         CaseProfile(
             name="178 - Petrini & Maeda v. Biloxi",
             caption=CaseCaption(
-                plaintiff="YURI PETRINI & SUMIRE MAEDA",
+                plaintiff="YURI PETRINI, SUMIRE MAEDA",
                 defendant="CITY OF BILOXI, MISSISSIPPI, et al.",
                 case_number="1:25-cv-00178",
             ),
-            signature=PETRINI_SIGNATURE,
+            signature=PETRINI_MAEDA_SIGNATURE,
         ),
         CaseProfile(
             name="233 - Petrini & Maeda v. Biloxi",
             caption=CaseCaption(
-                plaintiff="YURI PETRINI & SUMIRE MAEDA",
+                plaintiff="YURI PETRINI, SUMIRE MAEDA",
                 defendant="CITY OF BILOXI, MISSISSIPPI, et al.",
                 case_number="1:25-cv-00233",
             ),
-            signature=PETRINI_SIGNATURE,
+            signature=PETRINI_MAEDA_SIGNATURE,
         ),
         CaseProfile(
             name="254 - Petrini v. Biloxi",
@@ -122,6 +132,12 @@ class MainWindow(QMainWindow):
         self._updating = False
 
         self._setup_ui()
+
+        # Set initial filing date from the date input
+        self.document.signature.filing_date = self.date_input.text()
+
+        # Auto-select case 178 (first case profile) by default
+        self.case_dropdown.setCurrentIndex(1)  # Index 1 = "178 - Petrini & Maeda v. Biloxi"
 
     def _setup_ui(self):
         """Set up the main user interface with toolbar and 3 panels."""
@@ -178,6 +194,30 @@ class MainWindow(QMainWindow):
         self.case_dropdown.setMinimumWidth(200)
         self.case_dropdown.currentIndexChanged.connect(self._on_case_selected)
         layout.addWidget(self.case_dropdown)
+
+        # Document type dropdown
+        doc_type_label = QLabel("Type:")
+        doc_type_label.setStyleSheet("font-weight: bold; margin-left: 10px; margin-right: 3px;")
+        layout.addWidget(doc_type_label)
+
+        self.doc_type_dropdown = QComboBox()
+        self.doc_type_dropdown.addItems([
+            "-- Select Type --",
+            "MOTION",
+            "COMPLAINT",
+            "CUSTOM"
+        ])
+        self.doc_type_dropdown.setMinimumWidth(120)
+        self.doc_type_dropdown.currentIndexChanged.connect(self._on_doc_type_selected)
+        layout.addWidget(self.doc_type_dropdown)
+
+        # Custom title input (hidden by default, shown when CUSTOM selected)
+        self.custom_title_input = QLineEdit()
+        self.custom_title_input.setPlaceholderText("Enter custom title...")
+        self.custom_title_input.setFixedWidth(150)
+        self.custom_title_input.setVisible(False)
+        self.custom_title_input.textChanged.connect(self._on_custom_title_changed)
+        layout.addWidget(self.custom_title_input)
 
         # Separator
         layout.addSpacing(10)
@@ -271,6 +311,23 @@ class MainWindow(QMainWindow):
         """)
         signature_btn.clicked.connect(self._on_signature_clicked)
         layout.addWidget(signature_btn)
+
+        # Separator
+        layout.addSpacing(10)
+
+        # Date input for filing date
+        date_label = QLabel("Date:")
+        date_label.setStyleSheet("font-weight: bold; margin-right: 3px;")
+        layout.addWidget(date_label)
+
+        self.date_input = QLineEdit()
+        self.date_input.setFixedWidth(100)
+        self.date_input.setPlaceholderText("MM/DD/YYYY")
+        # Set today's date as default
+        today = date.today()
+        self.date_input.setText(today.strftime("%m/%d/%Y"))
+        self.date_input.textChanged.connect(self._on_date_changed)
+        layout.addWidget(self.date_input)
 
         # Spacer
         layout.addStretch()
@@ -766,14 +823,7 @@ class MainWindow(QMainWindow):
 
     def _on_preview_clicked(self):
         """Handle Preview button click - generate PDF and open in system viewer."""
-        if not self.document.paragraphs:
-            QMessageBox.warning(
-                self,
-                "No Content",
-                "Please add some paragraphs before previewing."
-            )
-            return
-
+        # Allow preview even without paragraphs (to see header and signature)
         try:
             # Generate PDF to temp file
             pdf_path = generate_pdf(
@@ -781,7 +831,8 @@ class MainWindow(QMainWindow):
                 self._section_starts,
                 global_spacing=self._global_spacing,
                 caption=self.document.caption,
-                signature=self.document.signature
+                signature=self.document.signature,
+                document_title=self.document.title
             )
 
             # Open in system PDF viewer (Preview.app on macOS)
@@ -801,13 +852,7 @@ class MainWindow(QMainWindow):
 
     def _on_export_clicked(self):
         """Handle Export button click - save PDF to user-selected location."""
-        if not self.document.paragraphs:
-            QMessageBox.warning(
-                self,
-                "No Content",
-                "Please add some paragraphs before exporting."
-            )
-            return
+        # Allow export even without paragraphs (to see header and signature)
 
         # Show save dialog
         file_path, _ = QFileDialog.getSaveFileName(
@@ -832,7 +877,8 @@ class MainWindow(QMainWindow):
                 output_path=file_path,
                 global_spacing=self._global_spacing,
                 caption=self.document.caption,
-                signature=self.document.signature
+                signature=self.document.signature,
+                document_title=self.document.title
             )
 
             # Show success and offer to open
@@ -878,6 +924,29 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.document.signature = dialog.get_signature()
 
+    def _on_date_changed(self, text: str):
+        """Handle date input change - update signature's filing date."""
+        self.document.signature.filing_date = text
+
+    def _on_doc_type_selected(self, index: int):
+        """Handle document type selection from dropdown."""
+        if index == 0:  # "-- Select Type --" option
+            self.document.title = ""
+            self.custom_title_input.setVisible(False)
+            return
+
+        doc_type = self.doc_type_dropdown.currentText()
+        if doc_type == "CUSTOM":
+            self.custom_title_input.setVisible(True)
+            self.document.title = self.custom_title_input.text().strip().upper()
+        else:
+            self.custom_title_input.setVisible(False)
+            self.document.title = doc_type
+
+    def _on_custom_title_changed(self, text: str):
+        """Handle custom title input change."""
+        self.document.title = text.strip().upper()
+
     def _on_case_selected(self, index: int):
         """Handle case profile selection from dropdown."""
         if index == 0:  # "-- Select Case --" option
@@ -895,11 +964,15 @@ class MainWindow(QMainWindow):
         )
         self.document.signature = SignatureBlock(
             attorney_name=profile.signature.attorney_name,
-            bar_number=profile.signature.bar_number,
-            firm_name=profile.signature.firm_name,
-            address=profile.signature.address,
             phone=profile.signature.phone,
             email=profile.signature.email,
+            attorney_name_2=profile.signature.attorney_name_2,
+            phone_2=profile.signature.phone_2,
+            email_2=profile.signature.email_2,
+            address=profile.signature.address,
+            bar_number=profile.signature.bar_number,
+            firm_name=profile.signature.firm_name,
+            filing_date=self.date_input.text(),  # Use current date from input
         )
 
 

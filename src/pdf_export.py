@@ -12,8 +12,30 @@ Formatting per Mississippi District Court requirements:
 
 import io
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+
+def _format_date_ordinal(date_str: str) -> str:
+    """
+    Convert MM/DD/YYYY to 'Xth day of Month, Year' format.
+    E.g., '11/23/2025' -> '23rd day of November, 2025'
+    """
+    try:
+        dt = datetime.strptime(date_str, "%m/%d/%Y")
+        day = dt.day
+        # Ordinal suffix
+        if 11 <= day <= 13:
+            suffix = "th"
+        else:
+            suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+        month = dt.strftime("%B")  # Full month name
+        year = dt.year
+        return f"{day}{suffix} day of {month}, {year}"
+    except (ValueError, TypeError):
+        # If parsing fails, return original
+        return date_str
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -44,27 +66,43 @@ LINE_SPACING = 24  # Double-spaced (12pt * 2)
 
 
 def _register_fonts():
-    """Register Times New Roman font if available."""
+    """Register Times New Roman font family (regular, bold, italic, bold-italic)."""
+    from reportlab.pdfbase.pdfmetrics import registerFontFamily
+
     # Try to register Times New Roman from system fonts
     try:
-        # macOS font paths
-        font_paths = [
-            "/Library/Fonts/Times New Roman.ttf",
-            "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
-            "/System/Library/Fonts/Times.ttc",
-        ]
-        for path in font_paths:
-            if Path(path).exists():
-                if path.endswith('.ttc'):
-                    # TTC files need special handling
-                    pdfmetrics.registerFont(TTFont('TimesNewRoman', path, subfontIndex=0))
-                else:
-                    pdfmetrics.registerFont(TTFont('TimesNewRoman', path))
-                return 'TimesNewRoman'
+        # macOS font paths for Times New Roman family
+        font_dir = "/Library/Fonts/"
+        alt_font_dir = "/System/Library/Fonts/Supplemental/"
+
+        # Check which directory has the fonts
+        if Path(font_dir + "Times New Roman.ttf").exists():
+            base_dir = font_dir
+        elif Path(alt_font_dir + "Times New Roman.ttf").exists():
+            base_dir = alt_font_dir
+        else:
+            # Fall back to built-in Times
+            return 'Times-Roman'
+
+        # Register all variants
+        pdfmetrics.registerFont(TTFont('TimesNewRoman', base_dir + "Times New Roman.ttf"))
+        pdfmetrics.registerFont(TTFont('TimesNewRoman-Bold', base_dir + "Times New Roman Bold.ttf"))
+        pdfmetrics.registerFont(TTFont('TimesNewRoman-Italic', base_dir + "Times New Roman Italic.ttf"))
+        pdfmetrics.registerFont(TTFont('TimesNewRoman-BoldItalic', base_dir + "Times New Roman Bold Italic.ttf"))
+
+        # Register the font family so <b> and <i> tags work
+        registerFontFamily(
+            'TimesNewRoman',
+            normal='TimesNewRoman',
+            bold='TimesNewRoman-Bold',
+            italic='TimesNewRoman-Italic',
+            boldItalic='TimesNewRoman-BoldItalic'
+        )
+        return 'TimesNewRoman'
     except Exception:
         pass
 
-    # Fall back to built-in Times
+    # Fall back to built-in Times (which already has bold support)
     return 'Times-Roman'
 
 
@@ -73,6 +111,7 @@ def _get_styles(font_name: str) -> dict:
     styles = getSampleStyleSheet()
 
     # Section header style (centered, bold, Roman numerals)
+    # Note: spaceBefore/spaceAfter handled manually via Spacer for more control
     section_style = ParagraphStyle(
         'SectionHeader',
         parent=styles['Normal'],
@@ -80,11 +119,12 @@ def _get_styles(font_name: str) -> dict:
         fontSize=FONT_SIZE,
         leading=LINE_SPACING,
         alignment=TA_CENTER,
-        spaceAfter=LINE_SPACING,
-        spaceBefore=LINE_SPACING,
+        spaceAfter=0,  # Handled manually
+        spaceBefore=0,  # Handled manually
     )
 
     # Paragraph style (numbered, justified, double-spaced)
+    # Number at left margin with hanging indent for wrapped text
     para_style = ParagraphStyle(
         'NumberedParagraph',
         parent=styles['Normal'],
@@ -92,9 +132,9 @@ def _get_styles(font_name: str) -> dict:
         fontSize=FONT_SIZE,
         leading=LINE_SPACING,
         alignment=TA_JUSTIFY,
-        firstLineIndent=0.5 * inch,
+        firstLineIndent=-0.5 * inch,  # Negative = hanging indent (number outdented)
         spaceAfter=LINE_SPACING / 2,
-        leftIndent=0,
+        leftIndent=0.5 * inch,  # All lines start here, first line hangs back
     )
 
     # Page number style
@@ -123,7 +163,7 @@ def _add_page_number(canvas, doc):
     canvas.restoreState()
 
 
-def _build_caption(caption, font_name: str) -> list:
+def _build_caption(caption, font_name: str, document_title: str = "") -> list:
     """
     Build the federal court case caption header.
 
@@ -133,6 +173,7 @@ def _build_caption(caption, font_name: str) -> list:
     - Plaintiff name on left, "Plaintiff," label on right
     - "v." on left
     - Defendant name on left, "Defendant." label on right
+    - Document title centered and bold after caption
     """
     styles = getSampleStyleSheet()
     elements = []
@@ -140,44 +181,47 @@ def _build_caption(caption, font_name: str) -> list:
     # Usable width (page width minus margins)
     usable_width = PAGE_WIDTH - 2 * MARGIN
 
-    # Court name style (centered, bold, caps) - no space between lines
+    # Single spacing for header (14pt leading for 12pt font)
+    SINGLE_SPACING = 14
+
+    # Court name style (centered, bold, caps) - single spaced
     court_style = ParagraphStyle(
         'CourtName',
         parent=styles['Normal'],
         fontName=font_name,
         fontSize=FONT_SIZE,
-        leading=LINE_SPACING,
+        leading=SINGLE_SPACING,
         alignment=TA_CENTER,
         spaceAfter=0,  # No space between court name lines
     )
 
-    # Case number style (right aligned, size 10)
+    # Case number style (right aligned, size 10) - single spaced
     case_style = ParagraphStyle(
         'CaseNumber',
         parent=styles['Normal'],
         fontName=font_name,
         fontSize=10,  # Size 10pt as requested
-        leading=LINE_SPACING,
+        leading=SINGLE_SPACING,
         alignment=TA_RIGHT,
     )
 
-    # Party name style (left aligned)
+    # Party name style (left aligned) - single spaced
     party_style = ParagraphStyle(
         'PartyName',
         parent=styles['Normal'],
         fontName=font_name,
         fontSize=FONT_SIZE,
-        leading=LINE_SPACING,
+        leading=SINGLE_SPACING,
         alignment=TA_LEFT,
     )
 
-    # Label style (right aligned for Plaintiff/Defendant labels)
+    # Label style (right aligned for Plaintiff/Defendant labels) - single spaced
     label_style = ParagraphStyle(
         'PartyLabel',
         parent=styles['Normal'],
         fontName=font_name,
         fontSize=FONT_SIZE,
-        leading=LINE_SPACING,
+        leading=SINGLE_SPACING,
         alignment=TA_RIGHT,
     )
 
@@ -189,10 +233,10 @@ def _build_caption(caption, font_name: str) -> list:
     # Case number right after court, right-aligned
     case_num_text = f"Case No. {caption.case_number}" if caption.case_number else ""
     if case_num_text:
-        elements.append(Spacer(1, LINE_SPACING / 2))
+        elements.append(Spacer(1, SINGLE_SPACING / 2))
         elements.append(Paragraph(case_num_text, case_style))
 
-    elements.append(Spacer(1, LINE_SPACING / 2))
+    elements.append(Spacer(1, SINGLE_SPACING / 2))
 
     # Build caption table
     # Left column: party names, Right column: labels (Plaintiff, Defendant)
@@ -238,7 +282,20 @@ def _build_caption(caption, font_name: str) -> list:
         ]))
         elements.append(caption_table)
 
-    elements.append(Spacer(1, LINE_SPACING))
+    # Add document title if provided (bold, centered)
+    # Single line space before title, spacing after handled by first section
+    if document_title:
+        title_style = ParagraphStyle(
+            'DocTitle',
+            parent=styles['Normal'],
+            fontName=font_name,
+            fontSize=FONT_SIZE,
+            leading=LINE_SPACING,
+            alignment=TA_CENTER,
+            spaceBefore=LINE_SPACING / 2,  # Single line before title
+            spaceAfter=0,   # No extra space - let section handle it
+        )
+        elements.append(Paragraph(f"<b>{document_title}</b>", title_style))
 
     return elements
 
@@ -247,40 +304,69 @@ def _build_signature_and_certificate(signature, font_name: str) -> list:
     """
     Build the signature block and certificate of service.
 
+    Supports dual signatures side by side (left and right).
     These are kept together on the same page using KeepTogether.
     """
     styles = getSampleStyleSheet()
     elements = []
 
-    # Signature block style
-    sig_style = ParagraphStyle(
-        'SignatureBlock',
+    # Usable width for signature table
+    usable_width = PAGE_WIDTH - 2 * MARGIN
+
+    # Single spacing for signature block (14pt leading for 12pt font)
+    SIG_SINGLE_SPACING = 14
+
+    # Signature block style (left aligned, single spaced)
+    sig_style_left = ParagraphStyle(
+        'SignatureBlockLeft',
         parent=styles['Normal'],
         fontName=font_name,
         fontSize=FONT_SIZE,
-        leading=LINE_SPACING,
+        leading=SIG_SINGLE_SPACING,
         alignment=TA_LEFT,
         spaceAfter=0,
     )
 
-    # Certificate header style (centered, bold)
+    # Signature block style (right aligned, single spaced)
+    sig_style_right = ParagraphStyle(
+        'SignatureBlockRight',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=SIG_SINGLE_SPACING,
+        alignment=TA_RIGHT,
+        spaceAfter=0,
+    )
+
+    # Signature block style (centered - for address)
+    sig_style_center = ParagraphStyle(
+        'SignatureBlockCenter',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=SIG_SINGLE_SPACING,
+        alignment=TA_CENTER,
+        spaceAfter=0,
+    )
+
+    # Certificate header style (centered, bold, single spaced)
     cert_header_style = ParagraphStyle(
         'CertHeader',
         parent=styles['Normal'],
         fontName=font_name,
         fontSize=FONT_SIZE,
-        leading=LINE_SPACING,
+        leading=SIG_SINGLE_SPACING,
         alignment=TA_CENTER,
-        spaceAfter=LINE_SPACING / 2,
+        spaceAfter=SIG_SINGLE_SPACING / 2,
     )
 
-    # Certificate body style
+    # Certificate body style (single spaced)
     cert_body_style = ParagraphStyle(
         'CertBody',
         parent=styles['Normal'],
         fontName=font_name,
         fontSize=FONT_SIZE,
-        leading=LINE_SPACING,
+        leading=SIG_SINGLE_SPACING,
         alignment=TA_JUSTIFY,
         firstLineIndent=0.5 * inch,
     )
@@ -288,41 +374,80 @@ def _build_signature_and_certificate(signature, font_name: str) -> list:
     # Add some space before signature
     elements.append(Spacer(1, LINE_SPACING * 2))
 
-    # Respectfully submitted
-    elements.append(Paragraph("Respectfully submitted,", sig_style))
-    elements.append(Spacer(1, LINE_SPACING * 2))
+    # Respectfully submitted with formatted date
+    filing_date = getattr(signature, 'filing_date', '') or ''
+    if filing_date:
+        formatted_date = _format_date_ordinal(filing_date)
+        elements.append(Paragraph(f"Respectfully submitted at this {formatted_date}.", sig_style_left))
+    else:
+        elements.append(Paragraph("Respectfully submitted,", sig_style_left))
+    elements.append(Spacer(1, SIG_SINGLE_SPACING * 3))  # Space for hand signature
 
-    # Signature line
-    elements.append(Paragraph(f"/s/ {signature.attorney_name}", sig_style))
+    # Check if we have dual signatures
+    has_dual_sig = signature.attorney_name and getattr(signature, 'attorney_name_2', '')
 
-    # Attorney details
-    if signature.attorney_name:
-        elements.append(Paragraph(f"<b>{signature.attorney_name}</b>", sig_style))
-    if signature.bar_number:
-        elements.append(Paragraph(signature.bar_number, sig_style))
-    if signature.firm_name:
-        elements.append(Paragraph(signature.firm_name, sig_style))
-    if signature.address:
-        elements.append(Paragraph(signature.address, sig_style))
-    if signature.phone:
-        elements.append(Paragraph(f"Tel: {signature.phone}", sig_style))
-    if signature.email:
-        elements.append(Paragraph(signature.email, sig_style))
+    if has_dual_sig:
+        # Dual signatures side by side using table (no /s/ - space for hand signature)
+        # Each signer's info is centered within their column
+        col_width = usable_width / 2
+        sig_table_data = [
+            # Signature line placeholders (blank for hand signature) - centered
+            [
+                Paragraph("_________________________", sig_style_center),
+                Paragraph("_________________________", sig_style_center)
+            ],
+            # Names with "Pro Se" designation (bold) - centered
+            [
+                Paragraph(f"<b>{signature.attorney_name}, Pro Se</b>", sig_style_center),
+                Paragraph(f"<b>{signature.attorney_name_2}, Pro Se</b>", sig_style_center)
+            ],
+        ]
+        # Add phone for each - centered
+        phone_2 = getattr(signature, 'phone_2', '')
+        if signature.phone or phone_2:
+            sig_table_data.append([
+                Paragraph(f"Tel: {signature.phone}", sig_style_center) if signature.phone else "",
+                Paragraph(f"Tel: {phone_2}", sig_style_center) if phone_2 else ""
+            ])
+        # Add email for each - centered
+        email_2 = getattr(signature, 'email_2', '')
+        if signature.email or email_2:
+            sig_table_data.append([
+                Paragraph(signature.email, sig_style_center) if signature.email else "",
+                Paragraph(email_2, sig_style_center) if email_2 else ""
+            ])
 
-    # Certificate of Service
+        sig_table = Table(sig_table_data, colWidths=[col_width, col_width])
+        sig_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        elements.append(sig_table)
+
+        # Shared address below the table (centered)
+        if signature.address:
+            elements.append(Paragraph(signature.address, sig_style_center))
+    else:
+        # Single signature (no /s/ - space for hand signature)
+        elements.append(Paragraph("_________________________", sig_style_center))
+        if signature.attorney_name:
+            elements.append(Paragraph(f"<b>{signature.attorney_name}, Pro Se</b>", sig_style_center))
+        if signature.phone:
+            elements.append(Paragraph(f"Tel: {signature.phone}", sig_style_center))
+        if signature.email:
+            elements.append(Paragraph(signature.email, sig_style_center))
+        if signature.address:
+            elements.append(Paragraph(signature.address, sig_style_center))
+
+    # Certificate of Service (no signatures needed below)
     elements.append(Spacer(1, LINE_SPACING * 2))
     elements.append(Paragraph("<b>CERTIFICATE OF SERVICE</b>", cert_header_style))
 
-    cert_text = (
-        "I hereby certify that on this date, I electronically filed the foregoing "
-        "with the Clerk of Court using the CM/ECF system, which will send notification "
-        "of such filing to all counsel of record."
-    )
+    cert_text = "I hereby certify that all counsel of record were served via ECF at the time of filing."
     elements.append(Paragraph(cert_text, cert_body_style))
-
-    # Signature on certificate
-    elements.append(Spacer(1, LINE_SPACING * 2))
-    elements.append(Paragraph(f"/s/ {signature.attorney_name}", sig_style))
 
     # Wrap everything in KeepTogether so they stay on same page
     return [KeepTogether(elements)]
@@ -334,7 +459,8 @@ def generate_pdf(
     output_path: str | None = None,
     global_spacing=None,
     caption=None,
-    signature=None
+    signature=None,
+    document_title: str = ""
 ) -> str:
     """
     Generate a PDF document with federal court formatting.
@@ -346,6 +472,7 @@ def generate_pdf(
         global_spacing: Global SpacingSettings object (optional)
         caption: CaseCaption object for court header (optional)
         signature: SignatureBlock object for signature and certificate of service (optional)
+        document_title: Title of document (e.g., "MOTION", "COMPLAINT") shown after caption
 
     Returns:
         Path to the generated PDF file.
@@ -384,12 +511,15 @@ def generate_pdf(
     story = []
 
     # Add caption if provided and has content
+    has_caption_or_title = False
     if caption and (caption.plaintiff or caption.defendant or caption.case_number):
-        story.extend(_build_caption(caption, font_name))
-        story.append(Spacer(1, LINE_SPACING))
+        story.extend(_build_caption(caption, font_name, document_title))
+        has_caption_or_title = True
+        # No extra spacer needed - spacing is in the title style
 
     current_section = None
     is_first_para_in_section = False
+    is_first_section = True  # Track if this is the first section after caption/title
 
     for para_num in sorted(paragraphs.keys()):
         para = paragraphs[para_num]
@@ -405,10 +535,16 @@ def generate_pdf(
             after_section = spacing.after_section if spacing else default_after_section
 
             section_text = f"<b>{section.id}. {section.title}</b>"
-            story.append(Spacer(1, LINE_SPACING * before_section))
+            # For first section after title: single line space (LINE_SPACING / 2)
+            # For other sections: use before_section setting
+            if is_first_section and has_caption_or_title and document_title:
+                story.append(Spacer(1, LINE_SPACING / 2))  # Single line after title
+            else:
+                story.append(Spacer(1, LINE_SPACING * before_section))
             story.append(Paragraph(section_text, styles['section']))
             story.append(Spacer(1, LINE_SPACING * after_section / 2))
             is_first_para_in_section = True
+            is_first_section = False
         else:
             # Add spacing between paragraphs (not before first para in section)
             if story and not is_first_para_in_section:

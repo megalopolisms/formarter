@@ -29,13 +29,22 @@ class SignatureBlock:
     """
     Signature block and certificate of service information.
     Appears at the end of every document.
+    Supports dual signatures (left and right) for pro se plaintiffs.
     """
+    # First signer (left side)
     attorney_name: str = ""
-    bar_number: str = ""
-    firm_name: str = ""
-    address: str = ""
     phone: str = ""
     email: str = ""
+    # Second signer (right side, optional)
+    attorney_name_2: str = ""
+    phone_2: str = ""
+    email_2: str = ""
+    # Shared info
+    address: str = ""  # Shared address
+    bar_number: str = ""
+    firm_name: str = ""
+    # Filing date (auto-populated with today's date by default)
+    filing_date: str = ""
     # Certificate of Service is auto-generated with ECF language
 
 
