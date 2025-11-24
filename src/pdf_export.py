@@ -531,6 +531,7 @@ def generate_pdf(
     current_section = None
     is_first_para_in_section = False
     is_first_section = True  # Track if this is the first section after caption/title
+    is_first_para_after_title = True  # Track if this is the very first paragraph
 
     for para_num in sorted(paragraphs.keys()):
         para = paragraphs[para_num]
@@ -556,9 +557,10 @@ def generate_pdf(
             story.append(Spacer(1, LINE_SPACING * after_section / 2))
             is_first_para_in_section = True
             is_first_section = False
+            is_first_para_after_title = False
         else:
-            # Add spacing between paragraphs (not before first para in section)
-            if story and not is_first_para_in_section:
+            # Add spacing between paragraphs (not before first para in section or first para after title)
+            if story and not is_first_para_in_section and not (is_first_para_after_title and has_caption_or_title and document_title):
                 # Get current section's spacing
                 spacing = current_section.custom_spacing if current_section and current_section.custom_spacing else None
                 between = spacing.between_paragraphs if spacing else default_between_paragraphs
@@ -566,6 +568,7 @@ def generate_pdf(
                     story.append(Spacer(1, LINE_SPACING * between / 2))
 
         is_first_para_in_section = False
+        is_first_para_after_title = False
 
         # Add numbered paragraph
         # Escape any HTML-like characters in the text
