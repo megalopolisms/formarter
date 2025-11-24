@@ -441,14 +441,35 @@ class CaseLibrary:
 
     @staticmethod
     def extract_first_page_text(pdf_path: str) -> str:
-        """Extract text from just the first page of a PDF."""
+        """
+        Extract text from just the first page of a PDF.
+
+        Falls back to OCR if the page is image-based (scanned) with no text layer.
+        """
         if not HAS_PYMUPDF:
             return ""
 
         try:
             doc = fitz.open(pdf_path)
             if len(doc) > 0:
-                text = doc[0].get_text()
+                page = doc[0]
+                text = page.get_text()
+
+                # If page has very little text (less than 50 chars), try OCR
+                if len(text.strip()) < 50 and HAS_OCR:
+                    try:
+                        # Convert page to image
+                        pix = page.get_pixmap(dpi=300)
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+                        # Perform OCR
+                        ocr_text = pytesseract.image_to_string(img)
+
+                        if len(ocr_text.strip()) > len(text.strip()):
+                            text = ocr_text
+                            print(f"  OCR used for first page ({len(ocr_text)} chars extracted)")
+                    except Exception as ocr_error:
+                        print(f"  OCR failed for first page: {ocr_error}")
             else:
                 text = ""
             doc.close()
