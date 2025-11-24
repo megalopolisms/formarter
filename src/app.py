@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
+    QTableWidget,
+    QTableWidgetItem,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -44,9 +46,11 @@ from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage, QIcon
 
 from .models import Document, Paragraph, Section, SpacingSettings, CaseCaption, SignatureBlock, CaseProfile
 from .models.saved_document import SavedDocument
+from .models.library_case import LibraryCase, Category, REPORTERS, COURTS
 from .pdf_export import generate_pdf
 from .storage import DocumentStorage
 from .case_law_extractor import CaseLawExtractor
+from .case_library import CaseLibrary, get_default_library_path
 
 
 class MainWindow(QMainWindow):
@@ -125,6 +129,9 @@ class MainWindow(QMainWindow):
         # Initialize storage manager
         self.storage = DocumentStorage()
 
+        # Initialize case library
+        self.case_library = CaseLibrary(get_default_library_path())
+
         # Currently loaded document (None = new unsaved document)
         self._current_saved_doc: SavedDocument | None = None
 
@@ -201,6 +208,10 @@ class MainWindow(QMainWindow):
         # Tab 2: Case Law Extractor
         case_law_tab = self._create_case_law_tab()
         self.tab_widget.addTab(case_law_tab, "Case Law")
+
+        # Tab 3: Library
+        library_tab = self._create_library_tab()
+        self.tab_widget.addTab(library_tab, "Library")
 
         main_layout.addWidget(self.tab_widget)
 
@@ -344,6 +355,588 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.case_law_results)
 
         return tab
+
+    def _create_library_tab(self) -> QWidget:
+        """Create the Case Library tab for storing and organizing case law PDFs."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Header
+        header = QLabel("Case Library")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        layout.addWidget(header)
+
+        description = QLabel(
+            "Store and organize case law PDFs with Bluebook citations. "
+            "Search by case name, citation, keywords, or full text content."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet("color: #666; margin-bottom: 10px;")
+        layout.addWidget(description)
+
+        # Toolbar with buttons and filters
+        toolbar_layout = QHBoxLayout()
+
+        # Add Case button
+        add_case_btn = QPushButton("+ Add Case")
+        add_case_btn.setStyleSheet("""
+            QPushButton {
+                background: #4a90d9;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #357abd;
+            }
+        """)
+        add_case_btn.clicked.connect(self._on_add_case)
+        toolbar_layout.addWidget(add_case_btn)
+
+        # Batch Import button
+        batch_import_btn = QPushButton("+ Batch Import")
+        batch_import_btn.setStyleSheet("""
+            QPushButton {
+                background: #6c757d;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #5a6268;
+            }
+        """)
+        batch_import_btn.clicked.connect(self._on_batch_import)
+        toolbar_layout.addWidget(batch_import_btn)
+
+        # Regenerate All Citations button
+        regenerate_all_btn = QPushButton("Regenerate All Citations")
+        regenerate_all_btn.setStyleSheet("""
+            QPushButton {
+                background: #28a745;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #218838;
+            }
+        """)
+        regenerate_all_btn.clicked.connect(self._on_regenerate_all_citations)
+        toolbar_layout.addWidget(regenerate_all_btn)
+
+        toolbar_layout.addSpacing(20)
+
+        # Category filter
+        cat_label = QLabel("Category:")
+        cat_label.setStyleSheet("font-weight: bold;")
+        toolbar_layout.addWidget(cat_label)
+
+        self.library_category_dropdown = QComboBox()
+        self.library_category_dropdown.setMinimumWidth(150)
+        self._refresh_library_categories()
+        self.library_category_dropdown.currentIndexChanged.connect(self._on_library_filter_changed)
+        toolbar_layout.addWidget(self.library_category_dropdown)
+
+        toolbar_layout.addSpacing(10)
+
+        # Search box
+        search_label = QLabel("Search:")
+        search_label.setStyleSheet("font-weight: bold;")
+        toolbar_layout.addWidget(search_label)
+
+        self.library_search_input = QLineEdit()
+        self.library_search_input.setPlaceholderText("Search cases...")
+        self.library_search_input.setMinimumWidth(200)
+        self.library_search_input.textChanged.connect(self._on_library_search_changed)
+        toolbar_layout.addWidget(self.library_search_input)
+
+        toolbar_layout.addStretch()
+
+        layout.addLayout(toolbar_layout)
+
+        # Case table
+        from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+        self.library_table = QTableWidget()
+        self.library_table.setColumnCount(6)
+        self.library_table.setHorizontalHeaderLabels([
+            "Case Name", "Citation", "Court", "Year", "Category", "Keywords"
+        ])
+        self.library_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.library_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.library_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.library_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.library_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.library_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.library_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.library_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.library_table.setAlternatingRowColors(True)
+        self.library_table.setStyleSheet("""
+            QTableWidget {
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+            QTableWidget::item:selected {
+                background: #4a90d9;
+                color: white;
+            }
+            QHeaderView::section {
+                background: #f0f0f0;
+                padding: 8px;
+                border: none;
+                border-bottom: 1px solid #ccc;
+                font-weight: bold;
+            }
+        """)
+        self.library_table.itemSelectionChanged.connect(self._on_library_selection_changed)
+        layout.addWidget(self.library_table)
+
+        # Action buttons
+        action_layout = QHBoxLayout()
+
+        self.lib_open_pdf_btn = QPushButton("Open PDF")
+        self.lib_open_pdf_btn.setEnabled(False)
+        self.lib_open_pdf_btn.clicked.connect(self._on_library_open_pdf)
+        action_layout.addWidget(self.lib_open_pdf_btn)
+
+        self.lib_view_text_btn = QPushButton("View Text")
+        self.lib_view_text_btn.setEnabled(False)
+        self.lib_view_text_btn.clicked.connect(self._on_library_view_text)
+        action_layout.addWidget(self.lib_view_text_btn)
+
+        self.lib_copy_citation_btn = QPushButton("Copy Citation")
+        self.lib_copy_citation_btn.setEnabled(False)
+        self.lib_copy_citation_btn.clicked.connect(self._on_library_copy_citation)
+        action_layout.addWidget(self.lib_copy_citation_btn)
+
+        self.lib_view_citations_btn = QPushButton("View Citations")
+        self.lib_view_citations_btn.setEnabled(False)
+        self.lib_view_citations_btn.clicked.connect(self._on_library_view_citations)
+        action_layout.addWidget(self.lib_view_citations_btn)
+
+        self.lib_edit_btn = QPushButton("Edit Tags")
+        self.lib_edit_btn.setEnabled(False)
+        self.lib_edit_btn.clicked.connect(self._on_library_edit_tags)
+        action_layout.addWidget(self.lib_edit_btn)
+
+        self.lib_delete_btn = QPushButton("Delete")
+        self.lib_delete_btn.setEnabled(False)
+        self.lib_delete_btn.setStyleSheet("""
+            QPushButton {
+                color: #dc3545;
+            }
+            QPushButton:hover {
+                background: #dc3545;
+                color: white;
+            }
+        """)
+        self.lib_delete_btn.clicked.connect(self._on_library_delete)
+        action_layout.addWidget(self.lib_delete_btn)
+
+        action_layout.addStretch()
+
+        # Case count label
+        self.library_count_label = QLabel("0 cases")
+        self.library_count_label.setStyleSheet("color: #666;")
+        action_layout.addWidget(self.library_count_label)
+
+        layout.addLayout(action_layout)
+
+        # Load initial data
+        self._refresh_library_table()
+
+        return tab
+
+    # ========== Library Tab Methods ==========
+
+    def _refresh_library_categories(self):
+        """Refresh the category dropdown in Library tab."""
+        self.library_category_dropdown.clear()
+        self.library_category_dropdown.addItem("All Categories", "")
+
+        for cat in self.case_library.list_categories():
+            self.library_category_dropdown.addItem(cat.name, cat.id)
+
+    def _refresh_library_table(self):
+        """Refresh the library table with current filter/search."""
+        # Get filter criteria
+        category_id = self.library_category_dropdown.currentData() or ""
+        search_query = self.library_search_input.text().strip()
+
+        # Get cases
+        if category_id:
+            cases = self.case_library.filter_by_category(category_id)
+        else:
+            cases = self.case_library.list_all()
+
+        # Apply search filter
+        if search_query:
+            search_lower = search_query.lower()
+            cases = [
+                c for c in cases
+                if search_lower in c.case_name.lower()
+                or search_lower in c.bluebook_citation.lower()
+                or any(search_lower in kw.lower() for kw in c.keywords)
+            ]
+
+        # Update table
+        self.library_table.setRowCount(len(cases))
+        for row, case in enumerate(cases):
+            # Store case ID in first column
+            name_item = QTableWidgetItem(case.case_name)
+            name_item.setData(Qt.ItemDataRole.UserRole, case.id)
+            self.library_table.setItem(row, 0, name_item)
+
+            self.library_table.setItem(row, 1, QTableWidgetItem(case.short_citation))
+            self.library_table.setItem(row, 2, QTableWidgetItem(case.court))
+            self.library_table.setItem(row, 3, QTableWidgetItem(case.year))
+
+            # Get category name
+            cat = self.case_library.get_category(case.category_id)
+            cat_name = cat.name if cat else ""
+            self.library_table.setItem(row, 4, QTableWidgetItem(cat_name))
+
+            self.library_table.setItem(row, 5, QTableWidgetItem(", ".join(case.keywords)))
+
+        # Update count
+        self.library_count_label.setText(f"{len(cases)} case{'s' if len(cases) != 1 else ''}")
+
+    def _get_selected_library_case_id(self) -> str:
+        """Get the ID of the currently selected case in the library table."""
+        selected = self.library_table.selectedItems()
+        if selected:
+            # Get the item in the first column of the selected row
+            row = selected[0].row()
+            name_item = self.library_table.item(row, 0)
+            if name_item:
+                return name_item.data(Qt.ItemDataRole.UserRole)
+        return ""
+
+    def _on_library_filter_changed(self):
+        """Handle category filter change."""
+        self._refresh_library_table()
+
+    def _on_library_search_changed(self):
+        """Handle search text change."""
+        self._refresh_library_table()
+
+    def _on_library_selection_changed(self):
+        """Handle selection change in library table."""
+        has_selection = len(self.library_table.selectedItems()) > 0
+        self.lib_open_pdf_btn.setEnabled(has_selection)
+        self.lib_view_text_btn.setEnabled(has_selection)
+        self.lib_copy_citation_btn.setEnabled(has_selection)
+        self.lib_view_citations_btn.setEnabled(has_selection)
+        self.lib_edit_btn.setEnabled(has_selection)
+        self.lib_delete_btn.setEnabled(has_selection)
+
+    def _on_add_case(self):
+        """Import a single PDF - processes immediately without prompts."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select PDF File", "", "PDF Files (*.pdf)"
+        )
+        if not file_path:
+            return
+
+        # Process immediately with batch import (handles single file too)
+        result = self.case_library.batch_import([file_path])
+
+        if result.successful:
+            case = result.successful[0]
+            # Show what was imported - citation if extracted, filename otherwise
+            display_name = case.bluebook_citation if case.volume else case.case_name
+            QMessageBox.information(
+                self, "Imported",
+                f"Added to library: {display_name}"
+            )
+        elif result.duplicates:
+            QMessageBox.information(
+                self, "Duplicate",
+                f"This case is already in the library."
+            )
+        elif result.errors:
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to import: {result.errors[0][1]}"
+            )
+
+        self._refresh_library_table()
+        self._refresh_library_categories()
+
+    def _on_batch_import(self):
+        """Import multiple PDFs - processes immediately without dialogs."""
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select PDF Files", "", "PDF Files (*.pdf)"
+        )
+        if not file_paths:
+            return
+
+        # Process all files immediately
+        result = self.case_library.batch_import(file_paths)
+
+        # Show summary
+        msg_parts = []
+        if result.successful:
+            msg_parts.append(f"{len(result.successful)} imported")
+        if result.duplicates:
+            msg_parts.append(f"{len(result.duplicates)} duplicates skipped")
+        if result.errors:
+            msg_parts.append(f"{len(result.errors)} errors")
+
+        msg = "\n".join(msg_parts) if msg_parts else "No files processed"
+        QMessageBox.information(self, "Import Complete", msg)
+
+        self._refresh_library_table()
+        self._refresh_library_categories()
+
+    def _on_library_open_pdf(self):
+        """Open the selected case's PDF in the default viewer."""
+        case_id = self._get_selected_library_case_id()
+        if case_id:
+            pdf_path = self.case_library.get_pdf_path(case_id)
+            if pdf_path and pdf_path.exists():
+                import subprocess
+                subprocess.run(["open", str(pdf_path)])
+            else:
+                QMessageBox.warning(self, "PDF Not Found", "The PDF file could not be found.")
+
+    def _on_library_view_text(self):
+        """Show the extracted text for the selected case."""
+        case_id = self._get_selected_library_case_id()
+        if case_id:
+            case = self.case_library.get_by_id(case_id)
+            text = self.case_library.get_case_text(case_id)
+            if text:
+                dialog = QDialog(self)
+                dialog.setWindowTitle(f"Text: {case.case_name}")
+                dialog.resize(700, 500)
+                layout = QVBoxLayout(dialog)
+
+                text_edit = QTextEdit()
+                text_edit.setReadOnly(True)
+                text_edit.setPlainText(text)
+                text_edit.setFont(QFont("Courier New", 11))
+                layout.addWidget(text_edit)
+
+                close_btn = QPushButton("Close")
+                close_btn.clicked.connect(dialog.accept)
+                layout.addWidget(close_btn)
+
+                dialog.exec()
+            else:
+                QMessageBox.information(self, "No Text", "No extracted text available for this case.")
+
+    def _on_library_copy_citation(self):
+        """Copy the Bluebook citation to clipboard."""
+        case_id = self._get_selected_library_case_id()
+        if case_id:
+            case = self.case_library.get_by_id(case_id)
+            if case:
+                clipboard = QApplication.clipboard()
+                clipboard.setText(case.bluebook_citation)
+                QMessageBox.information(self, "Copied", "Citation copied to clipboard.")
+
+    def _on_library_view_citations(self):
+        """View the extracted citations for the selected case with enhanced table view."""
+        case_id = self._get_selected_library_case_id()
+        if case_id:
+            citations = self.case_library.get_case_citations(case_id)
+            if citations:
+                # Create a dialog to display citations
+                dialog = QDialog(self)
+                dialog.setWindowTitle("Extracted Citations - Enhanced View")
+                dialog.setMinimumSize(1000, 600)
+
+                layout = QVBoxLayout(dialog)
+
+                # Header label
+                case = self.case_library.get_by_id(case_id)
+                header = QLabel(f"Citations extracted from: {case.case_name}")
+                header.setStyleSheet("font-weight: bold; font-size: 14px; margin-bottom: 10px;")
+                layout.addWidget(header)
+
+                # Create table widget
+                table = QTableWidget()
+                table.setColumnCount(4)
+                table.setHorizontalHeaderLabels(["Citation", "Context", "In Library", "Actions"])
+                table.setRowCount(len(citations))
+                table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+                table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+                table.setAlternatingRowColors(True)
+
+                # Set column widths
+                table.setColumnWidth(0, 200)  # Citation
+                table.setColumnWidth(1, 400)  # Context
+                table.setColumnWidth(2, 100)  # In Library
+                table.setColumnWidth(3, 150)  # Actions
+
+                # Populate table
+                for row, citation in enumerate(citations):
+                    # Column 0: Citation
+                    citation_item = QTableWidgetItem(citation)
+                    citation_item.setFont(QFont("Arial", 10))
+                    table.setItem(row, 0, citation_item)
+
+                    # Column 1: Context (extract from source text)
+                    context = self.case_library.find_citation_context(case_id, citation, context_chars=200)
+                    context_text = context if context else "Context not found"
+                    context_item = QTableWidgetItem(context_text)
+                    context_item.setFont(QFont("Arial", 9))
+                    context_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+                    context_item.setToolTip(context_text)  # Show full context on hover
+                    table.setItem(row, 1, context_item)
+
+                    # Column 2: In Library (check if citation exists)
+                    matched_case = self.case_library.find_citation_in_library(citation)
+                    if matched_case:
+                        status_item = QTableWidgetItem("✓ Yes")
+                        status_item.setForeground(QColor("#27AE60"))  # Green
+                        status_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+                        status_item.setToolTip(f"Matched to: {matched_case.case_name}")
+                        # Highlight row in green
+                        citation_item.setBackground(QColor("#D5F4E6"))
+                        context_item.setBackground(QColor("#D5F4E6"))
+                        status_item.setBackground(QColor("#D5F4E6"))
+                    else:
+                        status_item = QTableWidgetItem("✗ No")
+                        status_item.setForeground(QColor("#E67E22"))  # Orange
+                        status_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+                        status_item.setToolTip("This case is not in your library")
+                        # Highlight row in orange
+                        citation_item.setBackground(QColor("#FFF3E0"))
+                        context_item.setBackground(QColor("#FFF3E0"))
+                        status_item.setBackground(QColor("#FFF3E0"))
+                    table.setItem(row, 2, status_item)
+
+                    # Column 3: Actions (button to open case if in library)
+                    if matched_case:
+                        open_btn = QPushButton("Open Case")
+                        open_btn.setStyleSheet("""
+                            QPushButton {
+                                background: #27AE60;
+                                color: white;
+                                border: none;
+                                padding: 5px 10px;
+                                border-radius: 3px;
+                                font-weight: bold;
+                            }
+                            QPushButton:hover {
+                                background: #229954;
+                            }
+                        """)
+                        # Store the case ID for the button click handler
+                        open_btn.clicked.connect(lambda checked, cid=matched_case.id: self._open_library_case_pdf(cid))
+                        table.setCellWidget(row, 3, open_btn)
+                    else:
+                        action_item = QTableWidgetItem("—")
+                        action_item.setForeground(QColor("#BDC3C7"))  # Gray
+                        action_item.setBackground(QColor("#FFF3E0"))
+                        table.setItem(row, 3, action_item)
+
+                # Adjust row heights to fit content
+                table.resizeRowsToContents()
+
+                layout.addWidget(table)
+
+                # Summary label
+                in_library_count = sum(1 for c in citations if self.case_library.find_citation_in_library(c))
+                missing_count = len(citations) - in_library_count
+                summary = QLabel(f"Total: {len(citations)} citations | In Library: {in_library_count} | Missing: {missing_count}")
+                summary.setStyleSheet("font-size: 12px; color: #7F8C8D; margin-top: 10px;")
+                layout.addWidget(summary)
+
+                # Close button
+                close_btn = QPushButton("Close")
+                close_btn.clicked.connect(dialog.accept)
+                layout.addWidget(close_btn)
+
+                dialog.exec()
+            else:
+                QMessageBox.information(
+                    self, "No Citations",
+                    "No citations have been extracted for this case yet."
+                )
+
+    def _open_library_case_pdf(self, case_id: str):
+        """Open a library case PDF by its ID."""
+        case = self.case_library.get_by_id(case_id)
+        if case:
+            pdf_path = self.case_library.storage_dir / case.pdf_filename
+            if pdf_path.exists():
+                import subprocess
+                import platform
+
+                system = platform.system()
+                try:
+                    if system == "Darwin":  # macOS
+                        subprocess.run(["open", str(pdf_path)])
+                    elif system == "Windows":
+                        subprocess.run(["start", str(pdf_path)], shell=True)
+                    else:  # Linux
+                        subprocess.run(["xdg-open", str(pdf_path)])
+                except Exception as e:
+                    QMessageBox.warning(
+                        self, "Error",
+                        f"Could not open PDF: {e}"
+                    )
+            else:
+                QMessageBox.warning(
+                    self, "File Not Found",
+                    f"PDF file not found: {case.pdf_filename}"
+                )
+
+    def _on_regenerate_all_citations(self):
+        """Regenerate citations for all cases in the library."""
+        reply = QMessageBox.question(
+            self, "Regenerate All Citations",
+            "This will regenerate citations for all cases in the library using the current extraction logic. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            successful, failed = self.case_library.regenerate_all_citations()
+            QMessageBox.information(
+                self, "Citations Regenerated",
+                f"Successfully regenerated citations for {successful} cases.\n{failed} cases failed."
+            )
+
+    def _on_library_edit_tags(self):
+        """Edit the category and keywords for the selected case."""
+        case_id = self._get_selected_library_case_id()
+        if case_id:
+            case = self.case_library.get_by_id(case_id)
+            if case:
+                dialog = EditTagsDialog(self.case_library, case, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    self._refresh_library_table()
+                    self._refresh_library_categories()
+
+    def _on_library_delete(self):
+        """Delete the selected case from the library."""
+        case_id = self._get_selected_library_case_id()
+        if case_id:
+            case = self.case_library.get_by_id(case_id)
+            if case:
+                reply = QMessageBox.question(
+                    self, "Confirm Delete",
+                    f"Are you sure you want to delete:\n\n{case.bluebook_citation}\n\nThis will remove the PDF and text files.",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.case_library.delete(case_id)
+                    self._refresh_library_table()
 
     def _refresh_case_law_doc_list(self):
         """Refresh the document dropdown in Case Law tab."""
@@ -1904,3 +2497,422 @@ class SignatureDialog(QDialog):
             phone=self.phone_edit.text().strip(),
             email=self.email_edit.text().strip(),
         )
+
+
+# ========== Library Dialog Classes ==========
+
+class AddCaseDialog(QDialog):
+    """Dialog for adding a new case to the library."""
+
+    def __init__(self, case_library, parent=None):
+        super().__init__(parent)
+        self.case_library = case_library
+        self.pdf_path = ""
+        self.setWindowTitle("Add Case to Library")
+        self.setMinimumWidth(500)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        # PDF file selection
+        file_group = QGroupBox("PDF File")
+        file_layout = QHBoxLayout(file_group)
+
+        self.file_label = QLabel("No file selected")
+        self.file_label.setStyleSheet("color: #666;")
+        file_layout.addWidget(self.file_label, 1)
+
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._on_browse)
+        file_layout.addWidget(browse_btn)
+
+        layout.addWidget(file_group)
+
+        # Citation information
+        citation_group = QGroupBox("Citation Information")
+        form = QFormLayout(citation_group)
+
+        self.case_name_edit = QLineEdit()
+        self.case_name_edit.setPlaceholderText("e.g., Smith v. Jones")
+        self.case_name_edit.textChanged.connect(self._update_preview)
+        form.addRow("Case Name:", self.case_name_edit)
+
+        self.volume_edit = QLineEdit()
+        self.volume_edit.setPlaceholderText("e.g., 123")
+        self.volume_edit.setMaximumWidth(80)
+        self.volume_edit.textChanged.connect(self._update_preview)
+        form.addRow("Volume:", self.volume_edit)
+
+        self.reporter_combo = QComboBox()
+        self.reporter_combo.setEditable(True)
+        from .models.library_case import REPORTERS
+        self.reporter_combo.addItems(REPORTERS)
+        self.reporter_combo.currentTextChanged.connect(self._update_preview)
+        form.addRow("Reporter:", self.reporter_combo)
+
+        self.page_edit = QLineEdit()
+        self.page_edit.setPlaceholderText("e.g., 456")
+        self.page_edit.setMaximumWidth(80)
+        self.page_edit.textChanged.connect(self._update_preview)
+        form.addRow("Page:", self.page_edit)
+
+        self.year_edit = QLineEdit()
+        self.year_edit.setPlaceholderText("e.g., 2020")
+        self.year_edit.setMaximumWidth(80)
+        self.year_edit.textChanged.connect(self._update_preview)
+        form.addRow("Year:", self.year_edit)
+
+        self.court_combo = QComboBox()
+        self.court_combo.setEditable(True)
+        from .models.library_case import COURTS
+        self.court_combo.addItems(COURTS)
+        self.court_combo.currentTextChanged.connect(self._update_preview)
+        form.addRow("Court:", self.court_combo)
+
+        layout.addWidget(citation_group)
+
+        # Organization
+        org_group = QGroupBox("Organization")
+        org_form = QFormLayout(org_group)
+
+        self.category_combo = QComboBox()
+        self.category_combo.addItem("-- No Category --", "")
+        for cat in self.case_library.list_categories():
+            self.category_combo.addItem(cat.name, cat.id)
+        org_form.addRow("Category:", self.category_combo)
+
+        self.keywords_edit = QLineEdit()
+        self.keywords_edit.setPlaceholderText("e.g., qualified immunity, police misconduct")
+        org_form.addRow("Keywords:", self.keywords_edit)
+
+        layout.addWidget(org_group)
+
+        # Citation preview
+        preview_group = QGroupBox("Citation Preview")
+        preview_layout = QVBoxLayout(preview_group)
+        self.preview_label = QLabel("")
+        self.preview_label.setStyleSheet("font-style: italic; color: #333; padding: 10px;")
+        self.preview_label.setWordWrap(True)
+        preview_layout.addWidget(self.preview_label)
+        layout.addWidget(preview_group)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _on_browse(self):
+        """Browse for a PDF file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select PDF File", "", "PDF Files (*.pdf)"
+        )
+        if file_path:
+            self.pdf_path = file_path
+            self.file_label.setText(Path(file_path).name)
+            self.file_label.setStyleSheet("color: #333;")
+
+            # Try to extract citation from PDF content first, then filename
+            parsed = self.case_library.extract_citation_from_pdf(file_path)
+            if parsed:
+                self.case_name_edit.setText(parsed.get('case_name', ''))
+                self.volume_edit.setText(parsed.get('volume', ''))
+                self.reporter_combo.setCurrentText(parsed.get('reporter', ''))
+                self.page_edit.setText(parsed.get('page', ''))
+                if 'year' in parsed:
+                    self.year_edit.setText(parsed['year'])
+                if 'court' in parsed:
+                    self.court_combo.setCurrentText(parsed['court'])
+
+    def _update_preview(self):
+        """Update the citation preview."""
+        case_name = self.case_name_edit.text().strip()
+        volume = self.volume_edit.text().strip()
+        reporter = self.reporter_combo.currentText().strip()
+        page = self.page_edit.text().strip()
+        year = self.year_edit.text().strip()
+        court = self.court_combo.currentText().strip()
+
+        if case_name and volume and reporter and page:
+            citation = f"{case_name}, {volume} {reporter} {page}"
+            if court or year:
+                paren_parts = []
+                if court:
+                    paren_parts.append(court)
+                if year:
+                    paren_parts.append(year)
+                citation += f" ({' '.join(paren_parts)})"
+            self.preview_label.setText(citation)
+        else:
+            self.preview_label.setText("(Enter citation details above)")
+
+    def _on_accept(self):
+        """Validate and accept the dialog."""
+        if not self.pdf_path:
+            QMessageBox.warning(self, "Missing PDF", "Please select a PDF file.")
+            return
+
+        case_name = self.case_name_edit.text().strip()
+        volume = self.volume_edit.text().strip()
+        reporter = self.reporter_combo.currentText().strip()
+        page = self.page_edit.text().strip()
+
+        if not all([case_name, volume, reporter, page]):
+            QMessageBox.warning(
+                self, "Missing Information",
+                "Please fill in Case Name, Volume, Reporter, and Page."
+            )
+            return
+
+        # Check for duplicate
+        if self.case_library.is_duplicate(volume, reporter, page):
+            QMessageBox.warning(
+                self, "Duplicate Case",
+                f"A case with citation {volume} {reporter} {page} already exists in the library."
+            )
+            return
+
+        # Parse keywords
+        keywords_text = self.keywords_edit.text().strip()
+        keywords = [k.strip() for k in keywords_text.split(",") if k.strip()] if keywords_text else []
+
+        # Add the case
+        try:
+            self.case_library.add_case(
+                pdf_path=self.pdf_path,
+                case_name=case_name,
+                volume=volume,
+                reporter=reporter,
+                page=page,
+                year=self.year_edit.text().strip(),
+                court=self.court_combo.currentText().strip(),
+                category_id=self.category_combo.currentData() or "",
+                keywords=keywords
+            )
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to add case: {e}")
+
+
+class BatchImportDialog(QDialog):
+    """Dialog for batch importing multiple PDFs."""
+
+    def __init__(self, case_library, parent=None):
+        super().__init__(parent)
+        self.case_library = case_library
+        self.pdf_paths = []
+        self.setWindowTitle("Batch Import Cases")
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(400)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        # File selection
+        file_layout = QHBoxLayout()
+
+        select_btn = QPushButton("Select PDFs...")
+        select_btn.clicked.connect(self._on_select_files)
+        file_layout.addWidget(select_btn)
+
+        self.file_count_label = QLabel("No files selected")
+        self.file_count_label.setStyleSheet("color: #666;")
+        file_layout.addWidget(self.file_count_label)
+
+        file_layout.addStretch()
+
+        layout.addLayout(file_layout)
+
+        # Default category
+        cat_layout = QHBoxLayout()
+        cat_layout.addWidget(QLabel("Default Category:"))
+
+        self.category_combo = QComboBox()
+        self.category_combo.addItem("-- No Category --", "")
+        for cat in self.case_library.list_categories():
+            self.category_combo.addItem(cat.name, cat.id)
+        cat_layout.addWidget(self.category_combo)
+
+        cat_layout.addStretch()
+
+        layout.addLayout(cat_layout)
+
+        # Import queue list
+        queue_label = QLabel("Import Queue:")
+        queue_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(queue_label)
+
+        self.queue_list = QListWidget()
+        self.queue_list.setAlternatingRowColors(True)
+        layout.addWidget(self.queue_list)
+
+        # Status label
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: #666; margin-top: 5px;")
+        layout.addWidget(self.status_label)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+
+        import_btn = QPushButton("Import All Ready")
+        import_btn.setStyleSheet("""
+            QPushButton {
+                background: #4a90d9;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #357abd;
+            }
+        """)
+        import_btn.clicked.connect(self._on_import)
+        btn_layout.addWidget(import_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        btn_layout.addStretch()
+
+        layout.addLayout(btn_layout)
+
+    def _on_select_files(self):
+        """Select multiple PDF files."""
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select PDF Files", "", "PDF Files (*.pdf)"
+        )
+        if file_paths:
+            self.pdf_paths = file_paths
+            self.file_count_label.setText(f"{len(file_paths)} file(s) selected")
+            self._analyze_files()
+
+    def _analyze_files(self):
+        """Analyze selected files and populate the queue."""
+        self.queue_list.clear()
+
+        ready_count = 0
+        needs_info_count = 0
+        duplicate_count = 0
+
+        for pdf_path in self.pdf_paths:
+            # Extract citation from PDF content first
+            parsed = self.case_library.extract_citation_from_pdf(pdf_path)
+
+            item = QListWidgetItem()
+
+            if parsed:
+                # Check for duplicate
+                if self.case_library.is_duplicate(parsed['volume'], parsed['reporter'], parsed['page']):
+                    item.setText(f"[DUPLICATE] {Path(pdf_path).name}")
+                    item.setForeground(Qt.GlobalColor.gray)
+                    duplicate_count += 1
+                else:
+                    citation = f"{parsed['case_name']}, {parsed['volume']} {parsed['reporter']} {parsed['page']}"
+                    item.setText(f"[READY] {Path(pdf_path).name} -> {citation}")
+                    item.setForeground(Qt.GlobalColor.darkGreen)
+                    ready_count += 1
+            else:
+                item.setText(f"[NEEDS INFO] {Path(pdf_path).name}")
+                item.setForeground(Qt.GlobalColor.darkYellow)
+                needs_info_count += 1
+
+            item.setData(Qt.ItemDataRole.UserRole, pdf_path)
+            self.queue_list.addItem(item)
+
+        self.status_label.setText(
+            f"{ready_count} ready, {needs_info_count} need info, {duplicate_count} duplicates"
+        )
+
+    def _on_import(self):
+        """Import all ready files."""
+        if not self.pdf_paths:
+            QMessageBox.warning(self, "No Files", "Please select PDF files first.")
+            return
+
+        default_category_id = self.category_combo.currentData() or ""
+
+        result = self.case_library.batch_import(self.pdf_paths, default_category_id)
+
+        # Show results
+        msg = result.summary
+        if result.successful:
+            QMessageBox.information(self, "Import Complete", msg)
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Import Results", msg)
+
+
+class EditTagsDialog(QDialog):
+    """Dialog for editing case category and keywords."""
+
+    def __init__(self, case_library, case, parent=None):
+        super().__init__(parent)
+        self.case_library = case_library
+        self.case = case
+        self.setWindowTitle(f"Edit Tags: {case.case_name}")
+        self.setMinimumWidth(400)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Citation display
+        citation_label = QLabel(self.case.bluebook_citation)
+        citation_label.setStyleSheet("font-style: italic; color: #333; padding: 10px; background: #f0f0f0; border-radius: 5px;")
+        citation_label.setWordWrap(True)
+        layout.addWidget(citation_label)
+
+        # Category
+        form = QFormLayout()
+
+        self.category_combo = QComboBox()
+        self.category_combo.addItem("-- No Category --", "")
+        current_index = 0
+        for i, cat in enumerate(self.case_library.list_categories()):
+            self.category_combo.addItem(cat.name, cat.id)
+            if cat.id == self.case.category_id:
+                current_index = i + 1
+        self.category_combo.setCurrentIndex(current_index)
+        form.addRow("Category:", self.category_combo)
+
+        # Keywords
+        self.keywords_edit = QLineEdit()
+        self.keywords_edit.setText(", ".join(self.case.keywords))
+        self.keywords_edit.setPlaceholderText("e.g., qualified immunity, police misconduct")
+        form.addRow("Keywords:", self.keywords_edit)
+
+        layout.addLayout(form)
+
+        # Keyword suggestions
+        all_keywords = self.case_library.get_all_keywords()
+        if all_keywords:
+            suggest_label = QLabel("Existing keywords: " + ", ".join(all_keywords[:10]))
+            suggest_label.setStyleSheet("color: #666; font-size: 11px;")
+            suggest_label.setWordWrap(True)
+            layout.addWidget(suggest_label)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _on_accept(self):
+        """Save the changes."""
+        keywords_text = self.keywords_edit.text().strip()
+        keywords = [k.strip() for k in keywords_text.split(",") if k.strip()] if keywords_text else []
+
+        self.case_library.update_case(self.case.id, {
+            'category_id': self.category_combo.currentData() or "",
+            'keywords': keywords
+        })
+        self.accept()
