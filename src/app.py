@@ -2115,6 +2115,14 @@ class MainWindow(QMainWindow):
                 remove_action = section_menu.addAction("Remove from section")
                 remove_action.triggered.connect(lambda: self._remove_from_section(para_num))
 
+            # Add convert options
+            menu.addSeparator()
+            convert_section_action = menu.addAction("Convert to section header")
+            convert_section_action.triggered.connect(lambda: self._convert_para_to_section(para_num))
+
+            convert_subsection_action = menu.addAction("Convert to subsection header")
+            convert_subsection_action.triggered.connect(lambda: self._convert_para_to_subsection(para_num))
+
         elif item_type == "section":
             section_start_para = item_id
 
@@ -2468,6 +2476,109 @@ class MainWindow(QMainWindow):
             cursor.setPosition(char_start)
             cursor.setPosition(char_end, QTextCursor.MoveMode.KeepAnchor)
             cursor.insertText(new_tag)
+        finally:
+            self._updating = False
+
+        # Trigger re-parse
+        self._on_text_changed()
+
+    def _convert_para_to_section(self, para_num: int):
+        """Convert a paragraph into a section header."""
+        if para_num not in self.document.paragraphs:
+            return
+
+        para = self.document.paragraphs[para_num]
+        line_idx = self._para_line_map.get(para_num)
+        if line_idx is None:
+            return
+
+        # Get paragraph text to use as section title
+        para_text = para.text.strip().upper()
+
+        # Find next available Roman numeral
+        existing_numerals = [s.id for s in self._section_starts.values()]
+        for numeral in self.ROMAN_NUMERALS:
+            if numeral not in existing_numerals:
+                break
+        else:
+            numeral = f"S{len(self._section_starts) + 1}"
+
+        # Build section tag
+        section_tag = f"<SECTION>{numeral}. {para_text}</SECTION>"
+
+        # Replace the paragraph with section tag
+        text = self.text_editor.toPlainText()
+        lines = text.split("\n")
+
+        if line_idx >= len(lines):
+            return
+
+        # Calculate character positions
+        char_start = sum(len(lines[i]) + 1 for i in range(line_idx))
+        char_end = char_start + len(lines[line_idx])
+
+        self._updating = True
+        try:
+            cursor = self.text_editor.textCursor()
+            cursor.setPosition(char_start)
+            cursor.setPosition(char_end, QTextCursor.MoveMode.KeepAnchor)
+            cursor.insertText(section_tag)
+        finally:
+            self._updating = False
+
+        # Trigger re-parse
+        self._on_text_changed()
+
+    def _convert_para_to_subsection(self, para_num: int):
+        """Convert a paragraph into a subsection header."""
+        if para_num not in self.document.paragraphs:
+            return
+
+        para = self.document.paragraphs[para_num]
+        line_idx = self._para_line_map.get(para_num)
+        if line_idx is None:
+            return
+
+        # Get the section this paragraph belongs to
+        section = self._get_section_for_para(para_num)
+        parent_section_id = section.id if section else None
+
+        # Find next available letter for this section
+        existing_letters = []
+        for s in self._all_sections:
+            if s[2] and s[3] == parent_section_id:  # is_subsection and same parent
+                existing_letters.append(s[4])
+
+        letters = "abcdefghijklmnopqrstuvwxyz"
+        for letter in letters:
+            if letter not in existing_letters:
+                break
+        else:
+            letter = f"sub{len(existing_letters) + 1}"
+
+        # Get paragraph text to use as subsection title
+        para_text = para.text.strip().upper()
+
+        # Build subsection tag
+        subsection_tag = f"<SUBSECTION>{letter}. {para_text}</SUBSECTION>"
+
+        # Replace the paragraph with subsection tag
+        text = self.text_editor.toPlainText()
+        lines = text.split("\n")
+
+        if line_idx >= len(lines):
+            return
+
+        # Calculate character positions
+        char_start = sum(len(lines[i]) + 1 for i in range(line_idx))
+        char_end = char_start + len(lines[line_idx])
+
+        self._updating = True
+        try:
+            cursor = self.text_editor.textCursor()
+            cursor.setPosition(char_start)
+            cursor.setPosition(char_end, QTextCursor.MoveMode.KeepAnchor)
+            cursor.insertText(subsection_tag)
         finally:
             self._updating = False
 
