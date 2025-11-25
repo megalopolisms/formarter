@@ -2198,12 +2198,21 @@ class MainWindow(QMainWindow):
         # Build the subsection tag text
         subsection_tag = f"<SUBSECTION>{letter}. {name}</SUBSECTION>"
 
-        # Insert AFTER the section tag line
+        # Find the last subsection line for this section (to insert after it)
+        # This ensures new subsections appear AFTER existing ones, not before
+        last_subsection_line = section_line_idx
+        for s in self._all_sections:
+            if s[2] and s[3] == section.id:  # is_subsection=True and same parent
+                sub_line = self._section_line_map.get(s[0].id)
+                if sub_line is not None and sub_line > last_subsection_line:
+                    last_subsection_line = sub_line
+
+        # Insert AFTER the last subsection (or section if none exist)
         text = self.text_editor.toPlainText()
         lines = text.split("\n")
 
-        # Calculate character position for the line AFTER the section tag
-        insert_line = section_line_idx + 1
+        # Calculate character position for the line AFTER the last subsection/section
+        insert_line = last_subsection_line + 1
         char_pos = sum(len(lines[i]) + 1 for i in range(insert_line))
 
         # Insert subsection tag with newline
