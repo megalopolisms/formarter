@@ -43,7 +43,7 @@ from PyQt6.QtWidgets import (
     QApplication,
 )
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage, QIcon
+from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage, QIcon, QSyntaxHighlighter, QTextCharFormat, QColor
 
 from .models import Document, Paragraph, Section, SpacingSettings, CaseCaption, SignatureBlock, CaseProfile
 from .models.saved_document import SavedDocument
@@ -52,6 +52,60 @@ from .pdf_export import generate_pdf
 from .storage import DocumentStorage
 from .case_law_extractor import CaseLawExtractor
 from .case_library import CaseLibrary, get_default_library_path
+
+
+class SectionTagHighlighter(QSyntaxHighlighter):
+    """Syntax highlighter for section and subsection tags in the editor.
+
+    - Valid <SECTION>...</SECTION> tags: Green
+    - Valid <SUBSECTION>...</SUBSECTION> tags: Blue
+    - Malformed/incomplete tags: Red/Orange
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # Format for valid section tags
+        self.section_format = QTextCharFormat()
+        self.section_format.setForeground(QColor("#2E7D32"))  # Dark green
+        self.section_format.setFontWeight(QFont.Weight.Bold)
+
+        # Format for valid subsection tags
+        self.subsection_format = QTextCharFormat()
+        self.subsection_format.setForeground(QColor("#1565C0"))  # Dark blue
+        self.subsection_format.setFontItalic(True)
+
+        # Format for malformed tags (opening without closing)
+        self.error_format = QTextCharFormat()
+        self.error_format.setForeground(QColor("#D32F2F"))  # Red
+        self.error_format.setBackground(QColor("#FFEBEE"))  # Light red background
+
+        # Patterns for valid tags (complete)
+        self.section_pattern = re.compile(r'<SECTION>.*?</SECTION>', re.IGNORECASE)
+        self.subsection_pattern = re.compile(r'<SUBSECTION>.*?</SUBSECTION>', re.IGNORECASE)
+
+        # Patterns for malformed tags (opening without closing)
+        self.malformed_section = re.compile(r'<SECTION>(?!.*</SECTION>).*$', re.IGNORECASE)
+        self.malformed_subsection = re.compile(r'<SUBSECTION>(?!.*</SUBSECTION>).*$', re.IGNORECASE)
+
+    def highlightBlock(self, text: str):
+        """Apply syntax highlighting to a block of text."""
+
+        # Highlight valid section tags
+        for match in self.section_pattern.finditer(text):
+            self.setFormat(match.start(), match.end() - match.start(), self.section_format)
+
+        # Highlight valid subsection tags
+        for match in self.subsection_pattern.finditer(text):
+            self.setFormat(match.start(), match.end() - match.start(), self.subsection_format)
+
+        # Highlight malformed section tags
+        for match in self.malformed_section.finditer(text):
+            self.setFormat(match.start(), match.end() - match.start(), self.error_format)
+
+        # Highlight malformed subsection tags
+        for match in self.malformed_subsection.finditer(text):
+            self.setFormat(match.start(), match.end() - match.start(), self.error_format)
 
 
 class MainWindow(QMainWindow):
@@ -1227,6 +1281,9 @@ class MainWindow(QMainWindow):
 
         # Connect text changed signal for real-time paragraph detection
         self.text_editor.textChanged.connect(self._on_text_changed)
+
+        # Add syntax highlighting for section/subsection tags
+        self._highlighter = SectionTagHighlighter(self.text_editor.document())
 
         layout.addWidget(self.text_editor)
 
