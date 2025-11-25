@@ -1856,6 +1856,14 @@ class MainWindow(QMainWindow):
             pending_sections.clear()
             para_num += 1
 
+        # Handle sections/subsections at end of document with no following paragraphs
+        # These would otherwise be lost in pending_sections
+        for section, section_line, is_subsection, parent_id in pending_sections:
+            self._section_line_map[section.id] = section_line
+            display_letter = section.id.split("-")[-1] if is_subsection else section.id
+            # Use para_num=0 to indicate no following paragraph
+            self._all_sections.append((section, 0, is_subsection, parent_id, display_letter))
+
     def _calculate_pages(self):
         """Calculate which paragraphs go on which page."""
         self._page_assignments.clear()
@@ -1979,6 +1987,34 @@ class MainWindow(QMainWindow):
                 current_section_item.addChild(para_item)
             else:
                 self.section_tree.addTopLevelItem(para_item)
+
+        # Display empty sections at end of document (para_num=0)
+        if 0 in para_sections:
+            for section, is_subsection, display_letter in para_sections[0]:
+                section_text = f"{display_letter}. {section.title}"
+
+                if is_subsection:
+                    subsection_item = QTreeWidgetItem([section_text])
+                    subsection_item.setData(0, Qt.ItemDataRole.UserRole, ("subsection", section.id))
+
+                    font = subsection_item.font(0)
+                    font.setItalic(True)
+                    subsection_item.setFont(0, font)
+
+                    if current_section_item is not None:
+                        current_section_item.addChild(subsection_item)
+                    else:
+                        self.section_tree.addTopLevelItem(subsection_item)
+                else:
+                    section_item = QTreeWidgetItem([section_text + " (empty)"])
+                    section_item.setData(0, Qt.ItemDataRole.UserRole, ("section", 0))
+
+                    font = section_item.font(0)
+                    font.setBold(True)
+                    section_item.setFont(0, font)
+
+                    self.section_tree.addTopLevelItem(section_item)
+                    current_section_item = section_item
 
     def _update_page_tree(self):
         """Update the page tree widget with paragraphs grouped by page and section."""
