@@ -2,6 +2,7 @@
 Main application window for Formarter.
 """
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -70,6 +71,12 @@ class MainWindow(QMainWindow):
     # But reportlab adds paragraph spacing, so ~22-24 short paragraphs fit per page
     LINES_PER_PAGE = 54  # Single-spaced equivalent lines (27 double-spaced * 2)
     CHARS_PER_LINE = 78  # ~6.5" width at 12 chars/inch for Times New Roman 12pt
+
+    # Section tag pattern for bidirectional sync: <SECTION>I. TITLE</SECTION>
+    SECTION_TAG_PATTERN = re.compile(r'^<SECTION>(.+)</SECTION>$', re.IGNORECASE)
+
+    # Subsection tag pattern: <SUBSECTION>a. Background</SUBSECTION>
+    SUBSECTION_TAG_PATTERN = re.compile(r'^<SUBSECTION>(.+)</SUBSECTION>$', re.IGNORECASE)
 
     # Dual signature block for Yuri & Sumire cases (178, 233)
     PETRINI_MAEDA_SIGNATURE = SignatureBlock(
@@ -143,6 +150,12 @@ class MainWindow(QMainWindow):
 
         # Track which paragraph starts each section (para_num -> section)
         self._section_starts: dict[int, Section] = {}
+
+        # Track line positions for each section tag (section_id -> line_index)
+        self._section_line_map: dict[str, int] = {}
+
+        # Track all sections/subsections in order: (section, para_num, is_subsection, parent_id, display_letter)
+        self._all_sections: list[tuple[Section, int, bool, str | None, str]] = []
 
         # Track page assignments (page_num -> list of para_nums)
         self._page_assignments: dict[int, list[int]] = {}
@@ -1736,23 +1749,92 @@ class MainWindow(QMainWindow):
             self._updating = False
 
     def _parse_paragraphs(self):
-        """Parse the editor text into paragraphs (each line = one paragraph)."""
+        """Parse the editor text into paragraphs (each line = one paragraph).
+
+        Section tags like <SECTION>I. PARTIES</SECTION> are detected and create
+        sections in the tree. They do not count as paragraphs.
+
+        Subsection tags like <SUBSECTION>a. Background</SUBSECTION> are also supported.
+        """
         text = self.text_editor.toPlainText()
         lines = text.split("\n")
 
-        # Remember old section assignments before clearing
-        old_sections = dict(self._section_starts)
-
-        # Clean up and filter empty lines
+        # Clear all tracking data - sections are now parsed from text
         self.document.paragraphs.clear()
         self._para_line_map.clear()
+        self._section_starts.clear()
+        self._section_line_map.clear()
+        self._all_sections.clear()
 
         para_num = 1
+        # Queue of pending sections: (section, line_idx, is_subsection, parent_section_id)
+        pending_sections: list[tuple[Section, int, bool, str | None]] = []
+        # Track current section ID for subsection parenting
+        current_section_id: str | None = None
+
         for line_idx, line in enumerate(lines):
             cleaned = line.strip()
             if not cleaned:
                 continue
 
+            # Check if this line is a section tag
+            match = self.SECTION_TAG_PATTERN.match(cleaned)
+            if match:
+                # Parse section content: "I. PARTIES" or "II. JURISDICTION"
+                section_content = match.group(1).strip()
+
+                # Try to parse Roman numeral and title
+                parts = section_content.split(".", 1)
+                if len(parts) == 2:
+                    numeral = parts[0].strip()
+                    title = parts[1].strip()
+                else:
+                    # No dot found, use whole content as title, auto-assign numeral
+                    title = section_content
+                    existing_numerals = [s.id for s in self._section_starts.values()]
+                    for sec, _, _, _ in pending_sections:
+                        existing_numerals.append(sec.id)
+                    for numeral in self.ROMAN_NUMERALS:
+                        if numeral not in existing_numerals:
+                            break
+                    else:
+                        numeral = f"S{len(self._section_starts) + len(pending_sections) + 1}"
+
+                # Create section (will be assigned to next paragraph)
+                section = Section(id=numeral, title=title.upper())
+                pending_sections.append((section, line_idx, False, None))  # Sections have no parent
+                current_section_id = numeral  # Update current section for subsections
+                continue  # Skip paragraph creation for section tag
+
+            # Check if this line is a subsection tag
+            subsection_match = self.SUBSECTION_TAG_PATTERN.match(cleaned)
+            if subsection_match:
+                # Subsections are displayed but don't affect paragraph numbering
+                subsection_content = subsection_match.group(1).strip()
+                # Create section for display with lowercase letter
+                parts = subsection_content.split(".", 1)
+                if len(parts) == 2:
+                    letter = parts[0].strip().lower()
+                    title = parts[1].strip()
+                else:
+                    letter = "sub"
+                    title = subsection_content
+
+                # Use composite ID to avoid collisions: "I-a", "II-a"
+                parent = current_section_id
+                if parent:
+                    # Check pending sections for most recent section
+                    for sec, _, is_sub, _ in reversed(pending_sections):
+                        if not is_sub:
+                            parent = sec.id
+                            break
+                unique_id = f"{parent}-{letter}" if parent else letter
+
+                subsection = Section(id=unique_id, title=title.upper())
+                pending_sections.append((subsection, line_idx, True, parent))
+                continue
+
+            # Create paragraph
             para = Paragraph(
                 number=para_num,
                 text=cleaned,
@@ -1760,14 +1842,19 @@ class MainWindow(QMainWindow):
             )
             self.document.paragraphs[para_num] = para
             self._para_line_map[para_num] = line_idx
-            para_num += 1
 
-        # Re-apply section assignments (adjust for paragraph count changes)
-        new_section_starts = {}
-        for old_para_num, section in old_sections.items():
-            if old_para_num <= len(self.document.paragraphs):
-                new_section_starts[old_para_num] = section
-        self._section_starts = new_section_starts
+            # Assign all pending sections to this paragraph
+            for section, section_line, is_subsection, parent_id in pending_sections:
+                if not is_subsection:
+                    self._section_starts[para_num] = section
+                    current_section_id = section.id
+                self._section_line_map[section.id] = section_line
+                # Store: (section, para_num, is_subsection, parent_section_id, display_letter)
+                display_letter = section.id.split("-")[-1] if is_subsection else section.id
+                self._all_sections.append((section, para_num, is_subsection, parent_id, display_letter))
+
+            pending_sections.clear()
+            para_num += 1
 
     def _calculate_pages(self):
         """Calculate which paragraphs go on which page."""
@@ -1814,38 +1901,70 @@ class MainWindow(QMainWindow):
             current_line_count += para_lines
 
     def _update_section_tree(self):
-        """Update the section tree widget with current paragraphs grouped by sections."""
+        """Update the section tree widget with current paragraphs grouped by sections/subsections."""
         self.section_tree.clear()
 
         count = len(self.document.paragraphs)
-        section_count = len(self._section_starts)
-        self.section_tree_header.setText(
-            f"Section Tree ({count} para, {section_count} sec)"
-        )
+        section_count = len([s for s in self._all_sections if not s[2]])  # Count non-subsections
+        subsection_count = len([s for s in self._all_sections if s[2]])
+        header_text = f"Section Tree ({count} para, {section_count} sec"
+        if subsection_count > 0:
+            header_text += f", {subsection_count} sub"
+        header_text += ")"
+        self.section_tree_header.setText(header_text)
 
         if not self.document.paragraphs:
             return
 
         para_nums = sorted(self.document.paragraphs.keys())
         current_section_item = None
+        current_subsection_item = None
+
+        # Build a map of para_num -> list of (section, is_subsection, display_letter)
+        para_sections: dict[int, list[tuple[Section, bool, str]]] = {}
+        for section, para_num, is_subsection, parent_id, display_letter in self._all_sections:
+            if para_num not in para_sections:
+                para_sections[para_num] = []
+            para_sections[para_num].append((section, is_subsection, display_letter))
 
         for para_num in para_nums:
             para = self.document.paragraphs[para_num]
 
-            # Check if this paragraph starts a new section
-            if para_num in self._section_starts:
-                section = self._section_starts[para_num]
-                section_text = f"{section.id}. {section.title}"
+            # Check if this paragraph has sections/subsections
+            if para_num in para_sections:
+                for section, is_subsection, display_letter in para_sections[para_num]:
+                    # Use display_letter for showing (e.g., "a" instead of "I-a")
+                    section_text = f"{display_letter}. {section.title}"
 
-                current_section_item = QTreeWidgetItem([section_text])
-                current_section_item.setData(0, Qt.ItemDataRole.UserRole, ("section", para_num))
+                    if is_subsection:
+                        # Create subsection item (nested under current section)
+                        subsection_item = QTreeWidgetItem([section_text])
+                        subsection_item.setData(0, Qt.ItemDataRole.UserRole, ("subsection", section.id))
 
-                font = current_section_item.font(0)
-                font.setBold(True)
-                current_section_item.setFont(0, font)
+                        font = subsection_item.font(0)
+                        font.setItalic(True)
+                        subsection_item.setFont(0, font)
 
-                self.section_tree.addTopLevelItem(current_section_item)
-                current_section_item.setExpanded(True)
+                        if current_section_item is not None:
+                            current_section_item.addChild(subsection_item)
+                            subsection_item.setExpanded(True)
+                        else:
+                            self.section_tree.addTopLevelItem(subsection_item)
+                            subsection_item.setExpanded(True)
+
+                        current_subsection_item = subsection_item
+                    else:
+                        # Create section item (top level)
+                        current_section_item = QTreeWidgetItem([section_text])
+                        current_section_item.setData(0, Qt.ItemDataRole.UserRole, ("section", para_num))
+
+                        font = current_section_item.font(0)
+                        font.setBold(True)
+                        current_section_item.setFont(0, font)
+
+                        self.section_tree.addTopLevelItem(current_section_item)
+                        current_section_item.setExpanded(True)
+                        current_subsection_item = None  # Reset subsection
 
             # Create paragraph item
             preview = para.get_display_text(40)
@@ -1853,7 +1972,10 @@ class MainWindow(QMainWindow):
             para_item = QTreeWidgetItem([para_text])
             para_item.setData(0, Qt.ItemDataRole.UserRole, ("para", para_num))
 
-            if current_section_item is not None:
+            # Add to appropriate parent
+            if current_subsection_item is not None:
+                current_subsection_item.addChild(para_item)
+            elif current_section_item is not None:
                 current_section_item.addChild(para_item)
             else:
                 self.section_tree.addTopLevelItem(para_item)
@@ -1960,6 +2082,11 @@ class MainWindow(QMainWindow):
         elif item_type == "section":
             section_start_para = item_id
 
+            add_subsection_action = menu.addAction("Add subsection...")
+            add_subsection_action.triggered.connect(lambda: self._create_subsection_at(section_start_para))
+
+            menu.addSeparator()
+
             remove_action = menu.addAction("Remove section")
             remove_action.triggered.connect(lambda: self._remove_section(section_start_para))
 
@@ -1969,10 +2096,23 @@ class MainWindow(QMainWindow):
             spacing_action = menu.addAction("Spacing...")
             spacing_action.triggered.connect(lambda: self._edit_section_spacing(section_start_para))
 
+        elif item_type == "subsection":
+            subsection_id = item_id  # Composite ID like "I-a"
+
+            remove_action = menu.addAction("Remove subsection")
+            remove_action.triggered.connect(lambda: self._remove_subsection(subsection_id))
+
+            rename_action = menu.addAction("Rename subsection...")
+            rename_action.triggered.connect(lambda: self._rename_subsection(subsection_id))
+
         menu.exec(self.section_tree.viewport().mapToGlobal(position))
 
     def _create_section_at(self, para_num: int):
-        """Create a new section starting at the given paragraph."""
+        """Create a new section starting at the given paragraph.
+
+        Inserts a <SECTION>...</SECTION> tag line before the paragraph in the editor.
+        The text change will trigger parsing which creates the section.
+        """
         name, ok = QInputDialog.getText(
             self, "Create Section",
             "Section name (e.g., PARTIES, JURISDICTION):"
@@ -1982,6 +2122,7 @@ class MainWindow(QMainWindow):
 
         name = name.strip().upper()
 
+        # Find next available Roman numeral
         existing_numerals = [s.id for s in self._section_starts.values()]
         for numeral in self.ROMAN_NUMERALS:
             if numeral not in existing_numerals:
@@ -1989,47 +2130,185 @@ class MainWindow(QMainWindow):
         else:
             numeral = f"S{len(self._section_starts) + 1}"
 
-        section = Section(id=numeral, title=name)
-        self._section_starts[para_num] = section
+        # Build the section tag text
+        section_tag = f"<SECTION>{numeral}. {name}</SECTION>"
 
-        self._calculate_pages()
-        self._update_section_tree()
-        self._update_page_tree()
+        # Find the line position of the target paragraph
+        line_idx = self._para_line_map.get(para_num)
+        if line_idx is None:
+            return
+
+        # Insert the section tag before the paragraph
+        text = self.text_editor.toPlainText()
+        lines = text.split("\n")
+
+        # Calculate character position for the start of the target line
+        char_pos = sum(len(lines[i]) + 1 for i in range(line_idx))
+
+        # Insert section tag with newline
+        self._updating = True
+        try:
+            cursor = self.text_editor.textCursor()
+            cursor.setPosition(char_pos)
+            cursor.insertText(section_tag + "\n")
+        finally:
+            self._updating = False
+
+        # Trigger re-parse (this will create the section from the tag)
+        self._on_text_changed()
+
+    def _create_subsection_at(self, para_num: int):
+        """Create a new subsection for the section starting at para_num.
+
+        Inserts a <SUBSECTION>...</SUBSECTION> tag line AFTER the section tag in the editor.
+        """
+        # Get the section this subsection belongs to
+        section = self._section_starts.get(para_num)
+        if not section:
+            return  # No section at this paragraph
+
+        # Get section's line position
+        section_line_idx = self._section_line_map.get(section.id)
+        if section_line_idx is None:
+            return
+
+        name, ok = QInputDialog.getText(
+            self, "Create Subsection",
+            "Subsection name (e.g., Background, The Contract):"
+        )
+        if not ok or not name.strip():
+            return
+
+        name = name.strip().upper()
+
+        # Find next available lowercase letter for THIS section
+        # Get display letters (last part of composite ID) for subsections in this section
+        existing_letters = []
+        for s in self._all_sections:
+            if s[2] and s[3] == section.id:  # is_subsection=True and same parent
+                existing_letters.append(s[4])  # display_letter
+
+        letters = "abcdefghijklmnopqrstuvwxyz"
+        for letter in letters:
+            if letter not in existing_letters:
+                break
+        else:
+            letter = f"sub{len(existing_letters) + 1}"
+
+        # Build the subsection tag text
+        subsection_tag = f"<SUBSECTION>{letter}. {name}</SUBSECTION>"
+
+        # Insert AFTER the section tag line
+        text = self.text_editor.toPlainText()
+        lines = text.split("\n")
+
+        # Calculate character position for the line AFTER the section tag
+        insert_line = section_line_idx + 1
+        char_pos = sum(len(lines[i]) + 1 for i in range(insert_line))
+
+        # Insert subsection tag with newline
+        self._updating = True
+        try:
+            cursor = self.text_editor.textCursor()
+            cursor.setPosition(char_pos)
+            cursor.insertText(subsection_tag + "\n")
+        finally:
+            self._updating = False
+
+        # Trigger re-parse
+        self._on_text_changed()
 
     def _assign_to_section(self, para_num: int, section: Section):
-        """Move section to start at a different paragraph."""
-        current_start = None
-        for start_para, s in self._section_starts.items():
-            if s.id == section.id:
-                current_start = start_para
-                break
+        """Move section to start at a different paragraph.
 
-        if current_start is not None:
-            del self._section_starts[current_start]
+        Removes the old section tag and inserts it before the new paragraph.
+        """
+        # Find current section tag line
+        old_line_idx = self._section_line_map.get(section.id)
+        new_line_idx = self._para_line_map.get(para_num)
 
-        self._section_starts[para_num] = section
-        self._calculate_pages()
-        self._update_section_tree()
-        self._update_page_tree()
+        if old_line_idx is None or new_line_idx is None:
+            return
+
+        text = self.text_editor.toPlainText()
+        lines = text.split("\n")
+
+        if old_line_idx >= len(lines) or new_line_idx >= len(lines):
+            return
+
+        # Build section tag
+        section_tag = f"<SECTION>{section.id}. {section.title}</SECTION>"
+
+        self._updating = True
+        try:
+            # First, remove the old section tag
+            char_start = sum(len(lines[i]) + 1 for i in range(old_line_idx))
+            char_end = char_start + len(lines[old_line_idx]) + 1  # +1 for newline
+
+            cursor = self.text_editor.textCursor()
+            cursor.setPosition(char_start)
+            cursor.setPosition(char_end, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+
+            # Recalculate new line index after removal
+            # If old was before new, new index shifts up by 1
+            if old_line_idx < new_line_idx:
+                new_line_idx -= 1
+
+            # Reget text after removal
+            text = self.text_editor.toPlainText()
+            lines = text.split("\n")
+
+            # Insert at new location
+            char_pos = sum(len(lines[i]) + 1 for i in range(new_line_idx))
+            cursor = self.text_editor.textCursor()
+            cursor.setPosition(char_pos)
+            cursor.insertText(section_tag + "\n")
+        finally:
+            self._updating = False
+
+        # Trigger re-parse
+        self._on_text_changed()
 
     def _remove_from_section(self, para_num: int):
-        """Remove section that starts at this paragraph."""
-        if para_num in self._section_starts:
-            del self._section_starts[para_num]
-            self._calculate_pages()
-            self._update_section_tree()
-            self._update_page_tree()
+        """Remove section that starts at this paragraph (same as _remove_section)."""
+        self._remove_section(para_num)
 
     def _remove_section(self, section_start_para: int):
-        """Remove a section entirely."""
-        if section_start_para in self._section_starts:
-            del self._section_starts[section_start_para]
-            self._calculate_pages()
-            self._update_section_tree()
-            self._update_page_tree()
+        """Remove a section entirely by removing its tag from the editor."""
+        if section_start_para not in self._section_starts:
+            return
+
+        section = self._section_starts[section_start_para]
+        line_idx = self._section_line_map.get(section.id)
+        if line_idx is None:
+            return
+
+        # Remove the section tag line from the editor
+        text = self.text_editor.toPlainText()
+        lines = text.split("\n")
+
+        if line_idx >= len(lines):
+            return
+
+        # Calculate character positions
+        char_start = sum(len(lines[i]) + 1 for i in range(line_idx))
+        char_end = char_start + len(lines[line_idx]) + 1  # +1 for newline
+
+        self._updating = True
+        try:
+            cursor = self.text_editor.textCursor()
+            cursor.setPosition(char_start)
+            cursor.setPosition(char_end, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+        finally:
+            self._updating = False
+
+        # Trigger re-parse
+        self._on_text_changed()
 
     def _rename_section(self, section_start_para: int):
-        """Rename a section."""
+        """Rename a section by updating its tag in the editor."""
         if section_start_para not in self._section_starts:
             return
 
@@ -2039,9 +2318,116 @@ class MainWindow(QMainWindow):
             "New section name:",
             text=section.title
         )
-        if ok and name.strip():
-            section.title = name.strip().upper()
-            self._update_section_tree()
+        if not ok or not name.strip():
+            return
+
+        new_name = name.strip().upper()
+        line_idx = self._section_line_map.get(section.id)
+        if line_idx is None:
+            return
+
+        # Update the section tag in the editor
+        text = self.text_editor.toPlainText()
+        lines = text.split("\n")
+
+        if line_idx >= len(lines):
+            return
+
+        # Build new section tag
+        new_tag = f"<SECTION>{section.id}. {new_name}</SECTION>"
+
+        # Calculate character positions
+        char_start = sum(len(lines[i]) + 1 for i in range(line_idx))
+        char_end = char_start + len(lines[line_idx])
+
+        self._updating = True
+        try:
+            cursor = self.text_editor.textCursor()
+            cursor.setPosition(char_start)
+            cursor.setPosition(char_end, QTextCursor.MoveMode.KeepAnchor)
+            cursor.insertText(new_tag)
+        finally:
+            self._updating = False
+
+        # Trigger re-parse
+        self._on_text_changed()
+
+    def _remove_subsection(self, subsection_id: str):
+        """Remove a subsection by removing its tag from the editor."""
+        line_idx = self._section_line_map.get(subsection_id)
+        if line_idx is None:
+            return
+
+        text = self.text_editor.toPlainText()
+        lines = text.split("\n")
+
+        if line_idx >= len(lines):
+            return
+
+        # Calculate character positions
+        char_start = sum(len(lines[i]) + 1 for i in range(line_idx))
+        char_end = char_start + len(lines[line_idx]) + 1  # +1 for newline
+
+        self._updating = True
+        try:
+            cursor = self.text_editor.textCursor()
+            cursor.setPosition(char_start)
+            cursor.setPosition(char_end, QTextCursor.MoveMode.KeepAnchor)
+            cursor.removeSelectedText()
+        finally:
+            self._updating = False
+
+        # Trigger re-parse
+        self._on_text_changed()
+
+    def _rename_subsection(self, subsection_id: str):
+        """Rename a subsection by updating its tag in the editor."""
+        line_idx = self._section_line_map.get(subsection_id)
+        if line_idx is None:
+            return
+
+        # Get current title and display letter from _all_sections
+        current_title = ""
+        display_letter = subsection_id.split("-")[-1] if "-" in subsection_id else subsection_id
+        for s in self._all_sections:
+            if s[0].id == subsection_id:
+                current_title = s[0].title
+                break
+
+        name, ok = QInputDialog.getText(
+            self, "Rename Subsection",
+            "New subsection name:",
+            text=current_title
+        )
+        if not ok or not name.strip():
+            return
+
+        new_name = name.strip().upper()
+
+        text = self.text_editor.toPlainText()
+        lines = text.split("\n")
+
+        if line_idx >= len(lines):
+            return
+
+        # Build new subsection tag
+        new_tag = f"<SUBSECTION>{display_letter}. {new_name}</SUBSECTION>"
+
+        # Calculate character positions
+        char_start = sum(len(lines[i]) + 1 for i in range(line_idx))
+        char_end = char_start + len(lines[line_idx])
+
+        self._updating = True
+        try:
+            cursor = self.text_editor.textCursor()
+            cursor.setPosition(char_start)
+            cursor.setPosition(char_end, QTextCursor.MoveMode.KeepAnchor)
+            cursor.insertText(new_tag)
+        finally:
+            self._updating = False
+
+        # Trigger re-parse
+        self._on_text_changed()
 
     def _edit_section_spacing(self, section_start_para: int):
         """Edit spacing settings for a specific section."""
@@ -2070,18 +2456,29 @@ class MainWindow(QMainWindow):
         return self._section_starts[max(relevant_starts)]
 
     def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
-        """Handle click on tree item - highlight and scroll to paragraph in editor."""
+        """Handle click on tree item - highlight and scroll to paragraph or section in editor."""
         item_data = item.data(0, Qt.ItemDataRole.UserRole)
         if not item_data:
             return
 
         item_type, item_id = item_data
 
-        if item_type != "para":
+        # Determine which line to highlight
+        if item_type == "para":
+            line_idx = self._para_line_map.get(item_id)
+        elif item_type == "section":
+            # item_id is the para_num where section starts
+            section = self._section_starts.get(item_id)
+            if section:
+                line_idx = self._section_line_map.get(section.id)
+            else:
+                return
+        elif item_type == "subsection":
+            # item_id is the section.id (lowercase letter like "a", "b")
+            line_idx = self._section_line_map.get(item_id)
+        else:
             return
 
-        para_num = item_id
-        line_idx = self._para_line_map.get(para_num)
         if line_idx is None:
             return
 
