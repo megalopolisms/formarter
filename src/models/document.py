@@ -45,7 +45,8 @@ class SignatureBlock:
     firm_name: str = ""
     # Filing date (auto-populated with today's date by default)
     filing_date: str = ""
-    # Certificate of Service is auto-generated with ECF language
+    # Certificate of Service control
+    include_certificate: bool = True  # Set False for emergency/standalone signature pages
 
 
 @dataclass

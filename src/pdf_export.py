@@ -407,7 +407,12 @@ def _build_signature_and_certificate(signature, font_name: str) -> list:
 
     # Respectfully submitted with formatted date
     filing_date = getattr(signature, 'filing_date', '') or ''
-    if filing_date:
+    if filing_date == "__BLANK__":
+        # Special format for hand-filled date
+        from datetime import datetime
+        year = datetime.now().year
+        elements.append(Paragraph(f"Respectfully submitted at this ___ day of ____________, {year}.", sig_style_left))
+    elif filing_date:
         formatted_date = _format_date_ordinal(filing_date)
         elements.append(Paragraph(f"Respectfully submitted at this {formatted_date}.", sig_style_left))
     else:
@@ -473,18 +478,20 @@ def _build_signature_and_certificate(signature, font_name: str) -> list:
         if signature.address:
             elements.append(Paragraph(signature.address, sig_style_center))
 
-    # Certificate of Service
-    elements.append(Spacer(1, LINE_SPACING))  # Single line before certificate
-    elements.append(Paragraph("<b>CERTIFICATE OF SERVICE</b>", cert_header_style))
+    # Certificate of Service (optional - can be excluded for emergency/standalone signature pages)
+    include_certificate = getattr(signature, 'include_certificate', True)
+    if include_certificate:
+        elements.append(Spacer(1, LINE_SPACING))  # Single line before certificate
+        elements.append(Paragraph("<b>CERTIFICATE OF SERVICE</b>", cert_header_style))
 
-    cert_text = "I filed the foregoing in person with the Clerk of Court, which will send notification of such filing to all counsel of record."
-    elements.append(Paragraph(cert_text, cert_body_style))
+        cert_text = "I filed the foregoing in person with the Clerk of Court, which will send notification of such filing to all counsel of record."
+        elements.append(Paragraph(cert_text, cert_body_style))
 
-    # Add signature line and name for certificate of service
-    elements.append(Spacer(1, SIG_SINGLE_SPACING * 2))  # Space for hand signature
-    elements.append(Paragraph("_________________________", sig_style_center))
-    if signature.attorney_name:
-        elements.append(Paragraph(f"<b>{signature.attorney_name}</b>", sig_style_center))
+        # Add signature line and name for certificate of service
+        elements.append(Spacer(1, SIG_SINGLE_SPACING * 2))  # Space for hand signature
+        elements.append(Paragraph("_________________________", sig_style_center))
+        if signature.attorney_name:
+            elements.append(Paragraph(f"<b>{signature.attorney_name}</b>", sig_style_center))
 
     # Wrap everything in KeepTogether so they stay on same page
     return [KeepTogether(elements)]
@@ -498,7 +505,8 @@ def generate_pdf(
     caption=None,
     signature=None,
     document_title: str = "",
-    all_sections: list = None
+    all_sections: list = None,
+    skip_page_numbers: bool = False
 ) -> str:
     """
     Generate a PDF document with federal court formatting.
@@ -636,8 +644,11 @@ def generate_pdf(
     if signature and signature.attorney_name:
         story.extend(_build_signature_and_certificate(signature, font_name))
 
-    # Build PDF with page numbers
-    doc.build(story, onFirstPage=_add_page_number, onLaterPages=_add_page_number)
+    # Build PDF with or without page numbers
+    if skip_page_numbers:
+        doc.build(story)
+    else:
+        doc.build(story, onFirstPage=_add_page_number, onLaterPages=_add_page_number)
 
     return output_path
 

@@ -41,6 +41,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QTabWidget,
     QApplication,
+    QGridLayout,
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage, QIcon, QSyntaxHighlighter, QTextCharFormat, QColor
@@ -221,7 +222,7 @@ class MainWindow(QMainWindow):
         phone="(305) 504-1323",
         email="yuri@megalopolisms.com",
         attorney_name_2="Sumire Maeda",
-        phone_2="(305) 504-1323",
+        phone_2="(305) 497-9133",
         email_2="sumire@megalopolisms.com",
         address="929 Division Street, Biloxi, MS 39530",
     )
@@ -366,6 +367,10 @@ class MainWindow(QMainWindow):
         # Tab 4: Auditor (TRO Compliance Checker)
         auditor_tab = self._create_auditor_tab()
         self.tab_widget.addTab(auditor_tab, "Auditor")
+
+        # Tab 5: Quick Print (Emergency standalone documents)
+        quick_print_tab = self._create_quick_print_tab()
+        self.tab_widget.addTab(quick_print_tab, "Quick Print")
 
         main_layout.addWidget(self.tab_widget)
 
@@ -1432,6 +1437,223 @@ class MainWindow(QMainWindow):
             selection.cursor = cursor
             extra_selections.append(selection)
             self.audit_preview.setExtraSelections(extra_selections)
+
+    # =========================================================================
+    # QUICK PRINT TAB - Emergency Standalone Documents
+    # =========================================================================
+
+    def _create_quick_print_tab(self) -> QWidget:
+        """Create the Quick Print tab for emergency standalone documents."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Header
+        header = QLabel("Quick Print - Emergency Documents")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        layout.addWidget(header)
+
+        description = QLabel(
+            "Generate standalone documents for emergency filing. "
+            "These pages can be printed separately and attached to your filing."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet("color: #666;")
+        layout.addWidget(description)
+
+        # Case Profile selector
+        profile_layout = QHBoxLayout()
+        profile_label = QLabel("Case Profile:")
+        profile_label.setStyleSheet("font-weight: bold;")
+        profile_layout.addWidget(profile_label)
+
+        self.quick_print_profile_dropdown = QComboBox()
+        self.quick_print_profile_dropdown.setMinimumWidth(300)
+        for i, profile in enumerate(self.CASE_PROFILES):
+            self.quick_print_profile_dropdown.addItem(profile.name, i)
+        profile_layout.addWidget(self.quick_print_profile_dropdown)
+        profile_layout.addStretch()
+        layout.addLayout(profile_layout)
+
+        # Date option
+        date_layout = QHBoxLayout()
+        self.quick_print_date_cb = QCheckBox("Add specific date?")
+        self.quick_print_date_cb.setChecked(False)
+        self.quick_print_date_cb.stateChanged.connect(self._on_quick_print_date_toggle)
+        date_layout.addWidget(self.quick_print_date_cb)
+
+        from PyQt6.QtWidgets import QDateEdit
+        from PyQt6.QtCore import QDate
+        self.quick_print_date_edit = QDateEdit()
+        self.quick_print_date_edit.setDate(QDate.currentDate())
+        self.quick_print_date_edit.setCalendarPopup(True)
+        self.quick_print_date_edit.setEnabled(False)  # Disabled by default
+        self.quick_print_date_edit.setStyleSheet("QDateEdit:disabled { color: #999; }")
+        date_layout.addWidget(self.quick_print_date_edit)
+
+        date_hint = QLabel("<i>(When unchecked, prints blank lines to fill by hand)</i>")
+        date_hint.setStyleSheet("color: #666;")
+        date_layout.addWidget(date_hint)
+        date_layout.addStretch()
+        layout.addLayout(date_layout)
+
+        # Buttons grid
+        buttons_group = QGroupBox("Standalone Documents")
+        buttons_layout = QGridLayout(buttons_group)
+        buttons_layout.setSpacing(15)
+
+        # Signature Block button
+        sig_btn = QPushButton("Signature Block\n+ Certificate of Service")
+        sig_btn.setMinimumSize(200, 80)
+        sig_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                padding: 15px;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        sig_btn.clicked.connect(self._on_print_signature_block)
+        buttons_layout.addWidget(sig_btn, 0, 0)
+
+        # Placeholder for future standalone documents
+        placeholder = QLabel(
+            "<i>More standalone documents\ncoming soon...</i>"
+        )
+        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder.setStyleSheet("color: #999; padding: 20px;")
+        buttons_layout.addWidget(placeholder, 0, 1)
+
+        layout.addWidget(buttons_group)
+
+        # Preview area
+        preview_label = QLabel("Preview")
+        preview_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 10px;")
+        layout.addWidget(preview_label)
+
+        self.quick_print_preview = QTextEdit()
+        self.quick_print_preview.setReadOnly(True)
+        self.quick_print_preview.setPlaceholderText("Click a button above to generate a preview...")
+        self.quick_print_preview.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-family: 'Times New Roman', serif;
+                font-size: 12px;
+                background-color: white;
+            }
+        """)
+        layout.addWidget(self.quick_print_preview)
+
+        return tab
+
+    def _on_quick_print_date_toggle(self, state):
+        """Enable/disable date edit based on checkbox."""
+        self.quick_print_date_edit.setEnabled(state == 2)  # Qt.Checked = 2
+
+    def _on_print_signature_block(self):
+        """Generate and export a standalone signature block with certificate of service."""
+        import tempfile
+        import subprocess
+        from .pdf_export import generate_pdf
+
+        # Get selected case profile
+        profile_idx = self.quick_print_profile_dropdown.currentData()
+        if profile_idx is None:
+            profile_idx = 0
+        profile = self.CASE_PROFILES[profile_idx]
+
+        # Determine filing date
+        if self.quick_print_date_cb.isChecked():
+            # Use specific date from date picker (format: MM/DD/YYYY)
+            filing_date = self.quick_print_date_edit.date().toString("MM/dd/yyyy")
+        else:
+            # Use blank date for hand-filling
+            filing_date = "__BLANK__"
+
+        # Create signature block WITH certificate
+        signature = SignatureBlock(
+            attorney_name=profile.signature.attorney_name,
+            attorney_name_2=getattr(profile.signature, 'attorney_name_2', ''),
+            phone=profile.signature.phone,
+            phone_2=getattr(profile.signature, 'phone_2', ''),
+            email=profile.signature.email,
+            email_2=getattr(profile.signature, 'email_2', ''),
+            address=profile.signature.address,
+            bar_number=profile.signature.bar_number,
+            firm_name=profile.signature.firm_name,
+            filing_date=filing_date,  # Use selected date or blank
+            include_certificate=True  # Include certificate of service
+        )
+
+        # No body content - just signature block
+        paragraphs = {}
+
+        # Generate PDF
+        try:
+            # Create temp file
+            temp_file = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+            output_path = temp_file.name
+            temp_file.close()
+
+            # Generate with minimal content, no page numbers
+            generate_pdf(
+                paragraphs=paragraphs,
+                section_starts={},
+                output_path=output_path,
+                caption=None,  # No caption
+                signature=signature,
+                document_title="",  # No title
+                all_sections=[],
+                skip_page_numbers=True  # No page numbers for signature page
+            )
+
+            # Show preview
+            from datetime import datetime
+            year = datetime.now().year
+            preview_text = f"""
+SIGNATURE BLOCK PREVIEW
+=======================
+
+Respectfully submitted at this ___ day of ____________, {year}.
+
+
+_________________________
+{signature.attorney_name}, Pro Se
+Tel: {signature.phone}
+{signature.email}
+{signature.address}
+
+CERTIFICATE OF SERVICE
+I filed the foregoing in person with the Clerk of Court...
+
+_________________________
+{signature.attorney_name}
+
+PDF Generated: {output_path}
+"""
+            self.quick_print_preview.setPlainText(preview_text)
+
+            # Open PDF directly (no message box)
+            if sys.platform == "darwin":
+                subprocess.run(["open", output_path])
+            elif sys.platform == "win32":
+                subprocess.run(["start", output_path], shell=True)
+            else:
+                subprocess.run(["xdg-open", output_path])
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to generate signature block PDF:\n{str(e)}"
+            )
 
     def _refresh_case_law_doc_list(self):
         """Refresh the document dropdown in Case Law tab."""
@@ -4069,14 +4291,21 @@ class SignatureDialog(QDialog):
 
         layout.addWidget(attorney_group)
 
-        # Certificate of Service note
+        # Certificate of Service option
+        cert_group = QGroupBox("Certificate of Service")
+        cert_layout = QVBoxLayout(cert_group)
+
+        self.include_certificate_cb = QCheckBox("Include Certificate of Service")
+        self.include_certificate_cb.setChecked(getattr(signature, 'include_certificate', True))
+        cert_layout.addWidget(self.include_certificate_cb)
+
         cert_label = QLabel(
-            "<i>Certificate of Service will be automatically added stating "
-            "filing in person with Clerk of Court notifies all counsel.</i>"
+            "<i>Uncheck for emergency/standalone signature page (no date, no certificate)</i>"
         )
         cert_label.setWordWrap(True)
         cert_label.setStyleSheet("color: #666; padding: 5px;")
-        layout.addWidget(cert_label)
+        cert_layout.addWidget(cert_label)
+        layout.addWidget(cert_group)
 
         # Buttons
         buttons = QDialogButtonBox(
@@ -4095,6 +4324,7 @@ class SignatureDialog(QDialog):
             address=self.address_edit.text().strip(),
             phone=self.phone_edit.text().strip(),
             email=self.email_edit.text().strip(),
+            include_certificate=self.include_certificate_cb.isChecked(),
         )
 
 
