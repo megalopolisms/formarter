@@ -119,15 +119,27 @@ class SectionTagHighlighter(QSyntaxHighlighter):
 
 
 class LineBreakTextEdit(QTextEdit):
-    """Custom QTextEdit that converts line breaks to <line> tags when pasting.
+    """Custom QTextEdit that handles <line> tags for line breaks.
 
-    When text is pasted from clipboard:
-    - Single newlines within paragraphs are converted to <line> tags
+    Features:
+    - When Enter is pressed, inserts <line> on its own line
+    - When pasting text, converts line breaks to <line> tags
     - The <line> tag represents a line break in the PDF output
 
-    This allows users to paste multi-line text and have proper line spacing
-    in the exported PDF.
+    This allows users to have proper line spacing in the exported PDF.
     """
+
+    def keyPressEvent(self, event):
+        """Override Enter key to insert <line> tag for line breaks."""
+        from PyQt6.QtCore import Qt
+
+        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+            # Insert newline, then <line> tag, then another newline
+            self.insertPlainText('\n<line>\n')
+            return  # Don't call super, we handled it
+
+        # For all other keys, use default behavior
+        super().keyPressEvent(event)
 
     def insertFromMimeData(self, source):
         """Override paste behavior to convert line breaks to <line> tags."""
@@ -1891,14 +1903,65 @@ class MainWindow(QMainWindow):
         # Track current section ID for subsection parenting
         current_section_id: str | None = None
 
+        # Track accumulated paragraph text (for <line> continuation)
+        accumulated_text = ""
+        accumulated_line_idx = 0
+
         for line_idx, line in enumerate(lines):
             cleaned = line.strip()
+
+            # Check if this is a <line> tag (line break within paragraph)
+            if cleaned.lower() == '<line>':
+                if accumulated_text:
+                    # Add <line> to accumulated text for line break
+                    accumulated_text += '<line>'
+                continue
+
             if not cleaned:
+                # Empty line = paragraph break
+                # First, flush any accumulated text as a paragraph
+                if accumulated_text:
+                    para = Paragraph(
+                        number=para_num,
+                        text=accumulated_text,
+                        section_id=""
+                    )
+                    self.document.paragraphs[para_num] = para
+                    self._para_line_map[para_num] = accumulated_line_idx
+
+                    # Assign pending sections to this paragraph
+                    for section, section_line, is_subsection, parent_id in pending_sections:
+                        if not is_subsection:
+                            self._section_starts[para_num] = section
+                            current_section_id = section.id
+                        self._section_line_map[section.id] = section_line
+                        display_letter = section.id.split("-")[-1] if is_subsection else section.id
+                        self._all_sections.append((section, para_num, is_subsection, parent_id, display_letter))
+                    pending_sections.clear()
+
+                    para_num += 1
+                    accumulated_text = ""
                 continue
 
             # Check if this line is a section tag
             match = self.SECTION_TAG_PATTERN.match(cleaned)
             if match:
+                # Flush accumulated text before section
+                if accumulated_text:
+                    para = Paragraph(number=para_num, text=accumulated_text, section_id="")
+                    self.document.paragraphs[para_num] = para
+                    self._para_line_map[para_num] = accumulated_line_idx
+                    for section, section_line, is_subsection, parent_id in pending_sections:
+                        if not is_subsection:
+                            self._section_starts[para_num] = section
+                            current_section_id = section.id
+                        self._section_line_map[section.id] = section_line
+                        display_letter = section.id.split("-")[-1] if is_subsection else section.id
+                        self._all_sections.append((section, para_num, is_subsection, parent_id, display_letter))
+                    pending_sections.clear()
+                    para_num += 1
+                    accumulated_text = ""
+
                 # Parse section content: "I. PARTIES" or "II. JURISDICTION"
                 section_content = match.group(1).strip()
 
@@ -1928,6 +1991,21 @@ class MainWindow(QMainWindow):
             # Check if this line is a subsection tag
             subsection_match = self.SUBSECTION_TAG_PATTERN.match(cleaned)
             if subsection_match:
+                # Flush accumulated text before subsection
+                if accumulated_text:
+                    para = Paragraph(number=para_num, text=accumulated_text, section_id="")
+                    self.document.paragraphs[para_num] = para
+                    self._para_line_map[para_num] = accumulated_line_idx
+                    for section, section_line, is_subsection, parent_id in pending_sections:
+                        if not is_subsection:
+                            self._section_starts[para_num] = section
+                            current_section_id = section.id
+                        self._section_line_map[section.id] = section_line
+                        display_letter = section.id.split("-")[-1] if is_subsection else section.id
+                        self._all_sections.append((section, para_num, is_subsection, parent_id, display_letter))
+                    pending_sections.clear()
+                    para_num += 1
+                    accumulated_text = ""
                 # Subsections are displayed but don't affect paragraph numbering
                 subsection_content = subsection_match.group(1).strip()
                 # Create section for display with uppercase letter
@@ -1953,27 +2031,34 @@ class MainWindow(QMainWindow):
                 pending_sections.append((subsection, line_idx, True, parent))
                 continue
 
-            # Create paragraph
+            # Accumulate text (may include <line> breaks from previous lines)
+            if accumulated_text:
+                # Continue accumulating (there was a <line> before)
+                accumulated_text += cleaned
+            else:
+                # Start new paragraph accumulation
+                accumulated_text = cleaned
+                accumulated_line_idx = line_idx
+
+        # Flush any remaining accumulated text as final paragraph
+        if accumulated_text:
             para = Paragraph(
                 number=para_num,
-                text=cleaned,
+                text=accumulated_text,
                 section_id=""
             )
             self.document.paragraphs[para_num] = para
-            self._para_line_map[para_num] = line_idx
+            self._para_line_map[para_num] = accumulated_line_idx
 
-            # Assign all pending sections to this paragraph
+            # Assign pending sections to this paragraph
             for section, section_line, is_subsection, parent_id in pending_sections:
                 if not is_subsection:
                     self._section_starts[para_num] = section
                     current_section_id = section.id
                 self._section_line_map[section.id] = section_line
-                # Store: (section, para_num, is_subsection, parent_section_id, display_letter)
                 display_letter = section.id.split("-")[-1] if is_subsection else section.id
                 self._all_sections.append((section, para_num, is_subsection, parent_id, display_letter))
-
             pending_sections.clear()
-            para_num += 1
 
         # Handle sections/subsections at end of document with no following paragraphs
         # These would otherwise be lost in pending_sections
