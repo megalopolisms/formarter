@@ -620,15 +620,15 @@ def generate_pdf(
         is_first_para_in_section = False
         is_first_para_after_title = False
 
+        # Add extra spacing from multiple <line> tags (extra_lines_before)
+        # <line><line> = 1 extra line, <line><line><line> = 2 extra lines, etc.
+        if hasattr(para, 'extra_lines_before') and para.extra_lines_before > 0:
+            extra_space = LINE_SPACING * para.extra_lines_before
+            story.append(Spacer(1, extra_space))
+
         # Add numbered paragraph
-        # Handle <line> tags: convert to <br/> for ReportLab line breaks
-        text = para.text
-        # Replace <line> tags with a placeholder before escaping
-        text = re.sub(r'<line>', '\x00LINE_BREAK\x00', text, flags=re.IGNORECASE)
         # Escape any HTML-like characters in the text
-        safe_text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        # Convert placeholder back to <br/> for ReportLab
-        safe_text = safe_text.replace('\x00LINE_BREAK\x00', '<br/>')
+        safe_text = para.text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         para_text = f"{para.number}.&nbsp;&nbsp;&nbsp;{safe_text}"
         story.append(Paragraph(para_text, styles['paragraph']))
 

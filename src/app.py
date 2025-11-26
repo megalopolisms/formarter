@@ -1903,28 +1903,25 @@ class MainWindow(QMainWindow):
         # Track current section ID for subsection parenting
         current_section_id: str | None = None
 
-        # Track accumulated paragraph text (for <line> continuation)
+        # Track accumulated paragraph text
         accumulated_text = ""
         accumulated_line_idx = 0
+        # Track consecutive <line> tags for extra spacing
+        line_tag_count = 0
 
         for line_idx, line in enumerate(lines):
             cleaned = line.strip()
 
-            # Check if this is a <line> tag (line break within paragraph)
+            # Check if this is a <line> tag = paragraph break
+            # Multiple <line> tags add extra spacing: <line><line> = 1 extra line
             if cleaned.lower() == '<line>':
-                if accumulated_text:
-                    # Add <line> to accumulated text for line break
-                    accumulated_text += '<line>'
-                continue
-
-            if not cleaned:
-                # Empty line = paragraph break
-                # First, flush any accumulated text as a paragraph
+                # Flush any accumulated text as a paragraph
                 if accumulated_text:
                     para = Paragraph(
                         number=para_num,
                         text=accumulated_text,
-                        section_id=""
+                        section_id="",
+                        extra_lines_before=line_tag_count  # Apply pending extra lines
                     )
                     self.document.paragraphs[para_num] = para
                     self._para_line_map[para_num] = accumulated_line_idx
@@ -1941,6 +1938,36 @@ class MainWindow(QMainWindow):
 
                     para_num += 1
                     accumulated_text = ""
+                # Count consecutive <line> tags for NEXT paragraph's extra spacing
+                line_tag_count += 1
+                continue
+
+            if not cleaned:
+                # Empty line - same as <line>, creates paragraph break
+                if accumulated_text:
+                    para = Paragraph(
+                        number=para_num,
+                        text=accumulated_text,
+                        section_id="",
+                        extra_lines_before=line_tag_count
+                    )
+                    self.document.paragraphs[para_num] = para
+                    self._para_line_map[para_num] = accumulated_line_idx
+
+                    # Assign pending sections to this paragraph
+                    for section, section_line, is_subsection, parent_id in pending_sections:
+                        if not is_subsection:
+                            self._section_starts[para_num] = section
+                            current_section_id = section.id
+                        self._section_line_map[section.id] = section_line
+                        display_letter = section.id.split("-")[-1] if is_subsection else section.id
+                        self._all_sections.append((section, para_num, is_subsection, parent_id, display_letter))
+                    pending_sections.clear()
+
+                    para_num += 1
+                    accumulated_text = ""
+                # Count empty lines as extra spacing too
+                line_tag_count += 1
                 continue
 
             # Check if this line is a section tag
@@ -2031,21 +2058,38 @@ class MainWindow(QMainWindow):
                 pending_sections.append((subsection, line_idx, True, parent))
                 continue
 
-            # Accumulate text (may include <line> breaks from previous lines)
+            # Each text line starts a new paragraph
+            # If there was accumulated text, flush it first (shouldn't happen normally)
             if accumulated_text:
-                # Continue accumulating (there was a <line> before)
-                accumulated_text += cleaned
-            else:
-                # Start new paragraph accumulation
-                accumulated_text = cleaned
-                accumulated_line_idx = line_idx
+                para = Paragraph(
+                    number=para_num,
+                    text=accumulated_text,
+                    section_id="",
+                    extra_lines_before=line_tag_count
+                )
+                self.document.paragraphs[para_num] = para
+                self._para_line_map[para_num] = accumulated_line_idx
+                for section, section_line, is_subsection, parent_id in pending_sections:
+                    if not is_subsection:
+                        self._section_starts[para_num] = section
+                        current_section_id = section.id
+                    self._section_line_map[section.id] = section_line
+                    display_letter = section.id.split("-")[-1] if is_subsection else section.id
+                    self._all_sections.append((section, para_num, is_subsection, parent_id, display_letter))
+                pending_sections.clear()
+                para_num += 1
+
+            accumulated_text = cleaned
+            accumulated_line_idx = line_idx
+            line_tag_count = 0  # Reset for next paragraph
 
         # Flush any remaining accumulated text as final paragraph
         if accumulated_text:
             para = Paragraph(
                 number=para_num,
                 text=accumulated_text,
-                section_id=""
+                section_id="",
+                extra_lines_before=line_tag_count
             )
             self.document.paragraphs[para_num] = para
             self._para_line_map[para_num] = accumulated_line_idx

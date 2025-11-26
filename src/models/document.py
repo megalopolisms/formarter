@@ -82,6 +82,7 @@ class Paragraph:
     text: str
     section_id: str  # Which section this belongs to (e.g., "I", "II")
     subitem_id: Optional[str] = None  # Optional sub-item (e.g., "a", "b")
+    extra_lines_before: int = 0  # Extra blank lines before this paragraph (from multiple <line> tags)
 
     def get_display_text(self, max_length: int = 60) -> str:
         """Get truncated text for tree display."""
