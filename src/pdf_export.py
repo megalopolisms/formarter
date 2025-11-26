@@ -497,6 +497,63 @@ def _build_signature_and_certificate(signature, font_name: str) -> list:
     return [KeepTogether(elements)]
 
 
+def _build_certificate_only(signature, font_name: str) -> list:
+    """
+    Build certificate of service only (no signature block).
+    """
+    styles = getSampleStyleSheet()
+    elements = []
+
+    SIG_SINGLE_SPACING = 14
+
+    # Certificate header style (centered, bold)
+    cert_header_style = ParagraphStyle(
+        'CertHeader',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=SIG_SINGLE_SPACING,
+        alignment=TA_CENTER,
+        spaceAfter=SIG_SINGLE_SPACING / 2,
+    )
+
+    # Certificate body style
+    cert_body_style = ParagraphStyle(
+        'CertBody',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=SIG_SINGLE_SPACING,
+        alignment=TA_JUSTIFY,
+        firstLineIndent=0.5 * inch,
+    )
+
+    # Signature style (centered)
+    sig_style_center = ParagraphStyle(
+        'SignatureBlockCenter',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=SIG_SINGLE_SPACING,
+        alignment=TA_CENTER,
+        spaceAfter=0,
+    )
+
+    # Certificate of Service header
+    elements.append(Paragraph("<b>CERTIFICATE OF SERVICE</b>", cert_header_style))
+
+    cert_text = "I filed the foregoing in person with the Clerk of Court, which will send notification of such filing to all counsel of record."
+    elements.append(Paragraph(cert_text, cert_body_style))
+
+    # Add signature line and name
+    elements.append(Spacer(1, SIG_SINGLE_SPACING * 3))  # Space for hand signature
+    elements.append(Paragraph("_________________________", sig_style_center))
+    if signature.attorney_name:
+        elements.append(Paragraph(f"<b>{signature.attorney_name}</b>", sig_style_center))
+
+    return [KeepTogether(elements)]
+
+
 def generate_pdf(
     paragraphs: dict,
     section_starts: dict,
@@ -506,7 +563,8 @@ def generate_pdf(
     signature=None,
     document_title: str = "",
     all_sections: list = None,
-    skip_page_numbers: bool = False
+    skip_page_numbers: bool = False,
+    certificate_only: bool = False
 ) -> str:
     """
     Generate a PDF document with federal court formatting.
@@ -640,9 +698,12 @@ def generate_pdf(
         para_text = f"{para.number}.&nbsp;&nbsp;&nbsp;{safe_text}"
         story.append(Paragraph(para_text, styles['paragraph']))
 
-    # Add signature block and certificate of service if provided
+    # Add signature block and/or certificate of service if provided
     if signature and signature.attorney_name:
-        story.extend(_build_signature_and_certificate(signature, font_name))
+        if certificate_only:
+            story.extend(_build_certificate_only(signature, font_name))
+        else:
+            story.extend(_build_signature_and_certificate(signature, font_name))
 
     # Build PDF with or without page numbers
     if skip_page_numbers:

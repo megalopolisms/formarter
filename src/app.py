@@ -1520,16 +1520,48 @@ class MainWindow(QMainWindow):
                 background-color: #45a049;
             }
         """)
-        sig_btn.clicked.connect(self._on_print_signature_block)
+        sig_btn.clicked.connect(lambda: self._on_print_signature_block(include_cert=True))
         buttons_layout.addWidget(sig_btn, 0, 0)
 
-        # Placeholder for future standalone documents
-        placeholder = QLabel(
-            "<i>More standalone documents\ncoming soon...</i>"
-        )
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setStyleSheet("color: #999; padding: 20px;")
-        buttons_layout.addWidget(placeholder, 0, 1)
+        # Signature Block Only button
+        sig_only_btn = QPushButton("Signature Block\nOnly")
+        sig_only_btn.setMinimumSize(200, 80)
+        sig_only_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                padding: 15px;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        sig_only_btn.clicked.connect(lambda: self._on_print_signature_block(include_cert=False))
+        buttons_layout.addWidget(sig_only_btn, 0, 1)
+
+        # Certificate of Service Only button
+        cert_only_btn = QPushButton("Certificate of Service\nOnly")
+        cert_only_btn.setMinimumSize(200, 80)
+        cert_only_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                padding: 15px;
+                border: none;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+        """)
+        cert_only_btn.clicked.connect(self._on_print_certificate_only)
+        buttons_layout.addWidget(cert_only_btn, 0, 2)
 
         layout.addWidget(buttons_group)
 
@@ -1558,8 +1590,8 @@ class MainWindow(QMainWindow):
         """Enable/disable date edit based on checkbox."""
         self.quick_print_date_edit.setEnabled(state == 2)  # Qt.Checked = 2
 
-    def _on_print_signature_block(self):
-        """Generate and export a standalone signature block with certificate of service."""
+    def _on_print_signature_block(self, include_cert=True):
+        """Generate and export a standalone signature block."""
         import tempfile
         import subprocess
         from .pdf_export import generate_pdf
@@ -1578,7 +1610,7 @@ class MainWindow(QMainWindow):
             # Use blank date for hand-filling
             filing_date = "__BLANK__"
 
-        # Create signature block WITH certificate
+        # Create signature block
         signature = SignatureBlock(
             attorney_name=profile.signature.attorney_name,
             attorney_name_2=getattr(profile.signature, 'attorney_name_2', ''),
@@ -1590,7 +1622,7 @@ class MainWindow(QMainWindow):
             bar_number=profile.signature.bar_number,
             firm_name=profile.signature.firm_name,
             filing_date=filing_date,  # Use selected date or blank
-            include_certificate=True  # Include certificate of service
+            include_certificate=include_cert  # Include certificate based on button
         )
 
         # No body content - just signature block
@@ -1618,6 +1650,15 @@ class MainWindow(QMainWindow):
             # Show preview
             from datetime import datetime
             year = datetime.now().year
+            cert_section = ""
+            if include_cert:
+                cert_section = f"""
+CERTIFICATE OF SERVICE
+I filed the foregoing in person with the Clerk of Court...
+
+_________________________
+{signature.attorney_name}
+"""
             preview_text = f"""
 SIGNATURE BLOCK PREVIEW
 =======================
@@ -1630,13 +1671,7 @@ _________________________
 Tel: {signature.phone}
 {signature.email}
 {signature.address}
-
-CERTIFICATE OF SERVICE
-I filed the foregoing in person with the Clerk of Court...
-
-_________________________
-{signature.attorney_name}
-
+{cert_section}
 PDF Generated: {output_path}
 """
             self.quick_print_preview.setPlainText(preview_text)
@@ -1653,6 +1688,75 @@ PDF Generated: {output_path}
             QMessageBox.critical(
                 self, "Error",
                 f"Failed to generate signature block PDF:\n{str(e)}"
+            )
+
+    def _on_print_certificate_only(self):
+        """Generate and export a certificate of service only."""
+        import tempfile
+        import subprocess
+        from .pdf_export import generate_pdf
+
+        # Get selected case profile
+        profile_idx = self.quick_print_profile_dropdown.currentData()
+        if profile_idx is None:
+            profile_idx = 0
+        profile = self.CASE_PROFILES[profile_idx]
+
+        # Create minimal signature block (just need attorney_name for certificate)
+        signature = SignatureBlock(
+            attorney_name=profile.signature.attorney_name,
+        )
+
+        # Generate PDF
+        try:
+            # Create temp file
+            temp_file = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+            output_path = temp_file.name
+            temp_file.close()
+
+            # Generate certificate only
+            generate_pdf(
+                paragraphs={},
+                section_starts={},
+                output_path=output_path,
+                caption=None,
+                signature=signature,
+                document_title="",
+                all_sections=[],
+                skip_page_numbers=True,
+                certificate_only=True
+            )
+
+            # Show preview
+            preview_text = f"""
+CERTIFICATE OF SERVICE PREVIEW
+==============================
+
+CERTIFICATE OF SERVICE
+
+I filed the foregoing in person with the Clerk of Court,
+which will send notification of such filing to all counsel of record.
+
+
+_________________________
+{signature.attorney_name}
+
+PDF Generated: {output_path}
+"""
+            self.quick_print_preview.setPlainText(preview_text)
+
+            # Open PDF directly
+            if sys.platform == "darwin":
+                subprocess.run(["open", output_path])
+            elif sys.platform == "win32":
+                subprocess.run(["start", output_path], shell=True)
+            else:
+                subprocess.run(["xdg-open", output_path])
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to generate certificate PDF:\n{str(e)}"
             )
 
     def _refresh_case_law_doc_list(self):
