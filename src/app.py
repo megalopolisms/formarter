@@ -58,7 +58,7 @@ from .widgets.tag_picker import TagPickerDialog
 from .widgets.filter_bar import FilterBar
 from .auditor import (
     TRO_CHECKLIST, CheckCategory, CheckStatus,
-    ComplianceDetector, AuditResult, ItemResult,
+    ComplianceDetector, AuditResult, ItemResult, AuditOptions,
     save_audit_result, load_audit_result, load_audit_log
 )
 
@@ -1146,6 +1146,15 @@ class MainWindow(QMainWindow):
         audit_btn.clicked.connect(self._on_run_audit)
         selector_layout.addWidget(audit_btn)
 
+        # Options checkboxes
+        self.audit_ex_parte_cb = QCheckBox("Ex Parte?")
+        self.audit_ex_parte_cb.setToolTip("Check if this is an ex parte motion (no prior notice to defendants)")
+        selector_layout.addWidget(self.audit_ex_parte_cb)
+
+        self.audit_urgent_cb = QCheckBox("Urgent/Emergency?")
+        self.audit_urgent_cb.setToolTip("Check if this requires expedited/emergency review")
+        selector_layout.addWidget(self.audit_urgent_cb)
+
         selector_layout.addStretch()
         layout.addLayout(selector_layout)
 
@@ -1300,11 +1309,26 @@ class MainWindow(QMainWindow):
         # Show document in preview
         self.audit_preview.setPlainText(doc.text_content)
 
-        # Run the compliance detector
+        # Get case number from case profile
+        case_number = ""
+        if doc.case_profile_index and doc.case_profile_index <= len(self.CASE_PROFILES):
+            case_profile = self.CASE_PROFILES[doc.case_profile_index - 1]
+            case_number = case_profile.caption.case_number or ""
+
+        # Build audit options from UI
+        options = AuditOptions(
+            is_ex_parte=self.audit_ex_parte_cb.isChecked(),
+            is_urgent=self.audit_urgent_cb.isChecked(),
+            custom_title=doc.custom_title or "",
+            case_number=case_number
+        )
+
+        # Run the compliance detector with options
         detector = ComplianceDetector(
             document_text=doc.text_content,
             document_id=doc.id,
-            document_name=doc.name
+            document_name=doc.name,
+            options=options
         )
 
         # Run all checks with real-time logging
@@ -1349,8 +1373,12 @@ class MainWindow(QMainWindow):
                         child.setText(2, "MANUAL")
                         child.setBackground(2, QColor("#e0e0e0"))  # Gray
                         child.setForeground(2, QColor("#616161"))
-                    else:
+                    elif status == CheckStatus.NOT_APPLICABLE.value:
                         child.setText(2, "N/A")
+                        child.setBackground(2, QColor("#e8f5e9"))  # Very light green
+                        child.setForeground(2, QColor("#388e3c"))
+                    else:
+                        child.setText(2, "-")
                         child.setBackground(2, QColor("#f5f5f5"))
 
                     # Store line number for click-to-jump

@@ -24,7 +24,7 @@ from .results import (
     save_audit_log,
     load_audit_log,
 )
-from .detector import ComplianceDetector
+from .detector import ComplianceDetector, AuditOptions
 
 __all__ = [
     "CheckCategory",
@@ -40,4 +40,5 @@ __all__ = [
     "save_audit_log",
     "load_audit_log",
     "ComplianceDetector",
+    "AuditOptions",
 ]
