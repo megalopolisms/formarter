@@ -3245,8 +3245,8 @@ class SignatureDialog(QDialog):
 
         # Certificate of Service note
         cert_label = QLabel(
-            "<i>Certificate of Service will be automatically added with CM/ECF "
-            "filing language pursuant to Fed. R. Civ. P. 5(b)(2)(E) and L.U. Civ. R. 5(b).</i>"
+            "<i>Certificate of Service will be automatically added stating "
+            "filing in person with Clerk of Court notifies all counsel.</i>"
         )
         cert_label.setWordWrap(True)
         cert_label.setStyleSheet("color: #666; padding: 5px;")
