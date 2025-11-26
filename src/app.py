@@ -2172,6 +2172,20 @@ class MainWindow(QMainWindow):
                 remove_action = section_menu.addAction("Remove from section")
                 remove_action.triggered.connect(lambda: self._remove_from_section(para_num))
 
+            # Add subsection option if paragraph is under a section
+            section_for_para = self._get_section_for_para(para_num)
+            if section_for_para:
+                menu.addSeparator()
+                # Find the section's starting paragraph number
+                section_start_para = None
+                for start_para, sec in self._section_starts.items():
+                    if sec.id == section_for_para.id:
+                        section_start_para = start_para
+                        break
+                if section_start_para is not None:
+                    add_sub_action = menu.addAction(f"Add subsection under {section_for_para.id}. {section_for_para.title}...")
+                    add_sub_action.triggered.connect(lambda: self._create_subsection_at(section_start_para))
+
             # Add convert options
             menu.addSeparator()
             convert_section_action = menu.addAction("Convert to section header")
