@@ -484,7 +484,7 @@ def _build_signature_and_certificate(signature, font_name: str) -> list:
         elements.append(Spacer(1, LINE_SPACING))  # Single line before certificate
         elements.append(Paragraph("<b>CERTIFICATE OF SERVICE</b>", cert_header_style))
 
-        cert_text = "I filed the foregoing in person with the Clerk of Court, which will send notification of such filing to all counsel of record."
+        cert_text = "I hereby certify that on this date, I filed the foregoing in person with the Clerk of Court, which will send notification of such filing to all counsel of record via the CM/ECF system."
         elements.append(Paragraph(cert_text, cert_body_style))
 
         # Add signature line and name for certificate of service
