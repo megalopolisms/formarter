@@ -56,6 +56,11 @@ from .case_library import CaseLibrary, get_default_library_path
 from .widgets.filing_tree import FilingTreeWidget
 from .widgets.tag_picker import TagPickerDialog
 from .widgets.filter_bar import FilterBar
+from .auditor import (
+    TRO_CHECKLIST, CheckCategory, CheckStatus,
+    ComplianceDetector, AuditResult, ItemResult,
+    save_audit_result, load_audit_result, load_audit_log
+)
 
 
 class SectionTagHighlighter(QSyntaxHighlighter):
@@ -357,6 +362,10 @@ class MainWindow(QMainWindow):
         # Tab 3: Library
         library_tab = self._create_library_tab()
         self.tab_widget.addTab(library_tab, "Library")
+
+        # Tab 4: Auditor (TRO Compliance Checker)
+        auditor_tab = self._create_auditor_tab()
+        self.tab_widget.addTab(auditor_tab, "Auditor")
 
         main_layout.addWidget(self.tab_widget)
 
@@ -1082,6 +1091,319 @@ class MainWindow(QMainWindow):
                 if reply == QMessageBox.StandardButton.Yes:
                     self.case_library.delete(case_id)
                     self._refresh_library_table()
+
+    # =========================================================================
+    # AUDITOR TAB - TRO Motion Compliance Checker
+    # =========================================================================
+
+    def _create_auditor_tab(self) -> QWidget:
+        """Create the Auditor tab for TRO motion compliance checking."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Header
+        header = QLabel("TRO Motion Compliance Auditor")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        layout.addWidget(header)
+
+        description = QLabel(
+            "Verify TRO motion documents against the 107-item compliance checklist. "
+            "Select a document and click 'Run Audit' to check compliance with "
+            "Fed. R. Civ. P. 65 and Local Uniform Civil Rules."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet("color: #666;")
+        layout.addWidget(description)
+
+        # Document selector row
+        selector_layout = QHBoxLayout()
+
+        doc_label = QLabel("Document:")
+        doc_label.setStyleSheet("font-weight: bold;")
+        selector_layout.addWidget(doc_label)
+
+        self.auditor_doc_dropdown = QComboBox()
+        self.auditor_doc_dropdown.setMinimumWidth(300)
+        self._refresh_auditor_doc_list()
+        selector_layout.addWidget(self.auditor_doc_dropdown)
+
+        audit_btn = QPushButton("Run Audit")
+        audit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                padding: 8px 20px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        audit_btn.clicked.connect(self._on_run_audit)
+        selector_layout.addWidget(audit_btn)
+
+        selector_layout.addStretch()
+        layout.addLayout(selector_layout)
+
+        # Main content area - splitter with checklist and preview
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left: Checklist tree
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+
+        checklist_label = QLabel("Compliance Checklist (107 items)")
+        checklist_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        left_layout.addWidget(checklist_label)
+
+        self.checklist_tree = QTreeWidget()
+        self.checklist_tree.setHeaderLabels(["#", "Item", "Status", "Rule"])
+        self.checklist_tree.setColumnWidth(0, 40)
+        self.checklist_tree.setColumnWidth(1, 350)
+        self.checklist_tree.setColumnWidth(2, 80)
+        self.checklist_tree.setColumnWidth(3, 120)
+        self.checklist_tree.itemClicked.connect(self._on_checklist_item_clicked)
+        self.checklist_tree.setStyleSheet("""
+            QTreeWidget {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            QTreeWidget::item {
+                padding: 4px;
+            }
+            QTreeWidget::item:selected {
+                background-color: #e3f2fd;
+            }
+        """)
+        self._populate_checklist_tree()
+        left_layout.addWidget(self.checklist_tree)
+
+        splitter.addWidget(left_widget)
+
+        # Right: Document preview + Summary
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Summary panel
+        self.audit_summary = QLabel("No audit run yet. Select a document and click 'Run Audit'.")
+        self.audit_summary.setStyleSheet("""
+            QLabel {
+                background-color: #f5f5f5;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                padding: 15px;
+                font-size: 13px;
+            }
+        """)
+        self.audit_summary.setWordWrap(True)
+        self.audit_summary.setMinimumHeight(120)
+        right_layout.addWidget(self.audit_summary)
+
+        preview_label = QLabel("Document Preview")
+        preview_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 10px;")
+        right_layout.addWidget(preview_label)
+
+        self.audit_preview = QTextEdit()
+        self.audit_preview.setReadOnly(True)
+        self.audit_preview.setPlaceholderText("Document content will appear here after running an audit...")
+        self.audit_preview.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+            }
+        """)
+        right_layout.addWidget(self.audit_preview)
+
+        splitter.addWidget(right_widget)
+        splitter.setSizes([500, 400])
+
+        layout.addWidget(splitter)
+
+        return tab
+
+    def _refresh_auditor_doc_list(self):
+        """Refresh the document dropdown in Auditor tab."""
+        self.auditor_doc_dropdown.clear()
+        self.auditor_doc_dropdown.addItem("-- Select a Document --", None)
+
+        documents = self.storage.list_all()
+        for doc in documents:
+            case_name = self._get_case_name(doc.case_profile_index)
+            display = f"{doc.name} (Case {case_name})"
+            self.auditor_doc_dropdown.addItem(display, doc.id)
+
+    def _populate_checklist_tree(self):
+        """Populate the checklist tree with all 107 items grouped by category."""
+        self.checklist_tree.clear()
+
+        # Group items by category
+        categories = {}
+        for item in TRO_CHECKLIST:
+            cat = item.category
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(item)
+
+        # Add category nodes
+        for category in CheckCategory:
+            if category in categories:
+                cat_item = QTreeWidgetItem(self.checklist_tree)
+                cat_item.setText(0, "")
+                cat_item.setText(1, category.value)
+                cat_item.setText(2, "")
+                cat_item.setText(3, "")
+                cat_item.setExpanded(True)
+
+                font = cat_item.font(1)
+                font.setBold(True)
+                cat_item.setFont(1, font)
+                cat_item.setBackground(0, QColor("#e0e0e0"))
+                cat_item.setBackground(1, QColor("#e0e0e0"))
+                cat_item.setBackground(2, QColor("#e0e0e0"))
+                cat_item.setBackground(3, QColor("#e0e0e0"))
+
+                # Add items under this category
+                for item in categories[category]:
+                    child = QTreeWidgetItem(cat_item)
+                    child.setText(0, str(item.id))
+                    child.setText(1, item.description)
+                    child.setText(2, "-")
+                    child.setText(3, item.rule_citation)
+                    child.setData(0, Qt.ItemDataRole.UserRole, item.id)
+
+    def _on_run_audit(self):
+        """Run compliance audit on selected document."""
+        doc_id = self.auditor_doc_dropdown.currentData()
+        if not doc_id:
+            QMessageBox.warning(
+                self, "No Document Selected",
+                "Please select a document to audit."
+            )
+            return
+
+        doc = self.storage.get_by_id(doc_id)
+        if not doc:
+            QMessageBox.warning(
+                self, "Document Not Found",
+                "The selected document could not be found."
+            )
+            return
+
+        # Show document in preview
+        self.audit_preview.setPlainText(doc.text_content)
+
+        # Run the compliance detector
+        detector = ComplianceDetector(
+            document_text=doc.text_content,
+            document_id=doc.id,
+            document_name=doc.name
+        )
+
+        # Run all checks with real-time logging
+        result = detector.run_all_checks(self.storage.storage_dir)
+
+        # Update the checklist tree with results
+        self._display_audit_results(result)
+
+        # Update summary
+        self._update_audit_summary(result)
+
+    def _display_audit_results(self, result: AuditResult):
+        """Update the checklist tree with audit results."""
+        # Build a map of item_id -> result
+        result_map = {item.item_id: item for item in result.items}
+
+        # Iterate through tree items
+        for i in range(self.checklist_tree.topLevelItemCount()):
+            category_item = self.checklist_tree.topLevelItem(i)
+            for j in range(category_item.childCount()):
+                child = category_item.child(j)
+                item_id = child.data(0, Qt.ItemDataRole.UserRole)
+
+                if item_id in result_map:
+                    item_result = result_map[item_id]
+                    status = item_result.status
+
+                    # Set status column
+                    if status == CheckStatus.PASS.value:
+                        child.setText(2, "PASS")
+                        child.setBackground(2, QColor("#c8e6c9"))  # Light green
+                        child.setForeground(2, QColor("#2e7d32"))
+                    elif status == CheckStatus.FAIL.value:
+                        child.setText(2, "FAIL")
+                        child.setBackground(2, QColor("#ffcdd2"))  # Light red
+                        child.setForeground(2, QColor("#c62828"))
+                    elif status == CheckStatus.WARNING.value:
+                        child.setText(2, "WARN")
+                        child.setBackground(2, QColor("#fff9c4"))  # Light yellow
+                        child.setForeground(2, QColor("#f57f17"))
+                    elif status == CheckStatus.MANUAL.value:
+                        child.setText(2, "MANUAL")
+                        child.setBackground(2, QColor("#e0e0e0"))  # Gray
+                        child.setForeground(2, QColor("#616161"))
+                    else:
+                        child.setText(2, "N/A")
+                        child.setBackground(2, QColor("#f5f5f5"))
+
+                    # Store line number for click-to-jump
+                    if item_result.line_number:
+                        child.setData(1, Qt.ItemDataRole.UserRole, item_result.line_number)
+                        child.setToolTip(1, f"Line {item_result.line_number}: {item_result.message}")
+                    else:
+                        child.setToolTip(1, item_result.message)
+
+    def _update_audit_summary(self, result: AuditResult):
+        """Update the audit summary display."""
+        summary_text = f"""
+<b style="font-size: 16px;">{result.document_name}</b><br>
+<span style="color: #666;">Audited: {result.audit_date[:19].replace('T', ' ')}</span>
+<br><br>
+<b>Score: {result.score:.1f}%</b> ({result.checked_count} items checked)<br><br>
+<span style="color: #2e7d32;">PASSED: {result.passed}</span> |
+<span style="color: #c62828;">FAILED: {result.failed}</span> |
+<span style="color: #f57f17;">WARNING: {result.warnings}</span> |
+<span style="color: #616161;">MANUAL: {result.manual_review}</span>
+"""
+
+        if result.critical_issues:
+            summary_text += "<br><br><b style='color: #c62828;'>Critical Issues:</b><ul>"
+            for issue in result.critical_issues[:5]:  # Show max 5
+                summary_text += f"<li>{issue}</li>"
+            summary_text += "</ul>"
+
+        self.audit_summary.setText(summary_text)
+
+    def _on_checklist_item_clicked(self, item, column):
+        """Handle click on checklist item - jump to location in preview."""
+        line_num = item.data(1, Qt.ItemDataRole.UserRole)
+        if line_num:
+            # Move cursor to that line in preview
+            cursor = self.audit_preview.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+
+            for _ in range(line_num - 1):
+                cursor.movePosition(QTextCursor.MoveOperation.Down)
+
+            cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+            self.audit_preview.setTextCursor(cursor)
+            self.audit_preview.ensureCursorVisible()
+
+            # Highlight the line
+            extra_selections = []
+            selection = QTextEdit.ExtraSelection()
+            selection.format.setBackground(QColor("#fff9c4"))  # Yellow highlight
+            selection.format.setProperty(QTextCharFormat.Property.FullWidthSelection, True)
+            selection.cursor = cursor
+            extra_selections.append(selection)
+            self.audit_preview.setExtraSelections(extra_selections)
 
     def _refresh_case_law_doc_list(self):
         """Refresh the document dropdown in Case Law tab."""

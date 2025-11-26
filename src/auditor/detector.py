@@ -1,0 +1,618 @@
+"""
+Compliance Detector - Automatic compliance checking engine.
+
+Performs pattern matching and structural analysis for auto-checkable items.
+"""
+
+import re
+from typing import Tuple, Optional, List
+from datetime import datetime
+from pathlib import Path
+
+from .checklist import (
+    CheckStatus, ChecklistItem, TRO_CHECKLIST,
+    get_auto_checkable_items, CheckCategory
+)
+from .results import (
+    ItemResult, AuditResult, AuditLog,
+    save_audit_result, save_audit_log
+)
+
+
+class ComplianceDetector:
+    """
+    Automatic compliance detection for TRO motion documents.
+
+    Performs pattern matching and structural analysis for items marked
+    as auto_checkable in the checklist.
+    """
+
+    def __init__(self, document_text: str, document_id: str = "", document_name: str = ""):
+        """
+        Initialize detector with document text.
+
+        Args:
+            document_text: The full text content of the document
+            document_id: Document ID for logging
+            document_name: Document name for logging
+        """
+        self.text = document_text
+        self.lines = document_text.split('\n')
+        self.document_id = document_id
+        self.document_name = document_name
+
+    def _find_line_number(self, char_pos: int) -> int:
+        """Convert character position to line number (1-based)."""
+        return self.text[:char_pos].count('\n') + 1
+
+    def _search_pattern(self, pattern: str, flags: int = re.IGNORECASE) -> Tuple[bool, Optional[int], Optional[str]]:
+        """
+        Search for a pattern in the text.
+
+        Returns:
+            Tuple of (found, line_number, matched_text)
+        """
+        match = re.search(pattern, self.text, flags)
+        if match:
+            line_num = self._find_line_number(match.start())
+            return (True, line_num, match.group())
+        return (False, None, None)
+
+    # =========================================================================
+    # CAPTION AND TITLE CHECKS (Items 1-9)
+    # =========================================================================
+
+    def check_court_name(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 1: Full court name present."""
+        found, line, _ = self._search_pattern(
+            r"UNITED\s+STATES\s+DISTRICT\s+COURT"
+        )
+        if found:
+            return (CheckStatus.PASS, "Court name found", line)
+        return (CheckStatus.FAIL, "Court name not found", None)
+
+    def check_plaintiff_designation(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 2: Plaintiff designation."""
+        found, line, _ = self._search_pattern(r"PLAINTIFF")
+        if found:
+            return (CheckStatus.PASS, "Plaintiff designation found", line)
+        return (CheckStatus.FAIL, "Plaintiff designation not found", None)
+
+    def check_defendant_designation(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 3: Defendant designation."""
+        found, line, _ = self._search_pattern(r"DEFENDANT")
+        if found:
+            return (CheckStatus.PASS, "Defendant designation found", line)
+        return (CheckStatus.FAIL, "Defendant designation not found", None)
+
+    def check_case_number(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 4: Case number format."""
+        # Pattern: X:XX-cv-XXXXX
+        found, line, matched = self._search_pattern(r"\d:\d{2}-cv-\d+")
+        if found:
+            return (CheckStatus.PASS, f"Case number found: {matched}", line)
+        return (CheckStatus.FAIL, "Case number not found or invalid format", None)
+
+    def check_motion_title(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 5: Document title identifies as MOTION."""
+        patterns = [
+            r"MOTION\s+FOR\s+TEMPORARY\s+RESTRAINING\s+ORDER",
+            r"MOTION\s+FOR\s+TRO",
+            r"MOTION.*TEMPORARY\s+RESTRAINING",
+            r"EMERGENCY\s+MOTION",
+            r"EX\s+PARTE\s+MOTION"
+        ]
+        for pattern in patterns:
+            found, line, matched = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, f"Motion title found", line)
+        return (CheckStatus.FAIL, "Motion title not found", None)
+
+    def check_rule_65_in_title(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 6: Rule 65 cited in title."""
+        # Look in first 20 lines (title area)
+        title_text = '\n'.join(self.lines[:20])
+        patterns = [
+            r"Rule\s*65",
+            r"Fed\.?\s*R\.?\s*Civ\.?\s*P\.?\s*65"
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, title_text, re.IGNORECASE)
+            if match:
+                line_num = title_text[:match.start()].count('\n') + 1
+                return (CheckStatus.PASS, "Rule 65 cited in title", line_num)
+        return (CheckStatus.WARNING, "Rule 65 not found in title area", None)
+
+    def check_ex_parte(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 7: EX PARTE in title if applicable."""
+        found, line, _ = self._search_pattern(r"EX\s*PARTE")
+        if found:
+            return (CheckStatus.PASS, "EX PARTE designation found", line)
+        return (CheckStatus.WARNING, "EX PARTE not found - verify if notice was given", None)
+
+    def check_urgent_title(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 8: URGENT/NECESSITOUS in title."""
+        found, line, matched = self._search_pattern(r"URGENT|NECESSITOUS")
+        if found:
+            return (CheckStatus.PASS, f"'{matched}' found in title", line)
+        return (CheckStatus.WARNING, "URGENT/NECESSITOUS not found - may not be needed", None)
+
+    def check_emergency_title(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 9: EMERGENCY in title."""
+        found, line, _ = self._search_pattern(r"EMERGENCY")
+        if found:
+            return (CheckStatus.PASS, "EMERGENCY found in title", line)
+        return (CheckStatus.WARNING, "EMERGENCY not found - may not be needed", None)
+
+    # =========================================================================
+    # MOTION CONTENT CHECKS (Items 10-21)
+    # =========================================================================
+
+    def check_movant_identified(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 10: Opening paragraph identifies movant."""
+        patterns = [
+            r"(Plaintiff|Movant).*moves",
+            r"hereby\s+moves",
+            r"respectfully\s+moves",
+            r"comes\s+now.*moves"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "Movant identified", line)
+        return (CheckStatus.FAIL, "Movant not clearly identified in opening", None)
+
+    def check_pro_se_stated(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 11: States movant is pro se."""
+        found, line, _ = self._search_pattern(r"pro\s*se")
+        if found:
+            return (CheckStatus.PASS, "Pro se status stated", line)
+        return (CheckStatus.FAIL, "Pro se status not stated", None)
+
+    def check_rule_65b_cited(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 12: Fed. R. Civ. P. 65(b) cited."""
+        patterns = [
+            r"65\s*\(b\)",
+            r"Rule\s*65\s*\(b\)",
+            r"Fed\.?\s*R\.?\s*Civ\.?\s*P\.?\s*65\s*\(b\)"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "Rule 65(b) cited", line)
+        return (CheckStatus.FAIL, "Rule 65(b) not specifically cited", None)
+
+    def check_no_case_citations(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 15: NO case citations in motion."""
+        # Pattern for case citations: "123 F.3d 456", "123 U.S. 456", etc.
+        citation_pattern = r"\d+\s+(?:F\.\d+d?|U\.S\.|S\.\s*Ct\.|L\.\s*Ed\.)\s+\d+"
+        matches = list(re.finditer(citation_pattern, self.text, re.IGNORECASE))
+        if matches:
+            line_num = self._find_line_number(matches[0].start())
+            return (
+                CheckStatus.FAIL,
+                f"Found {len(matches)} case citation(s) - citations belong in brief",
+                line_num
+            )
+        return (CheckStatus.PASS, "No case citations in motion", None)
+
+    def check_irreparable_harm(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 21: States irreparable harm/injury."""
+        patterns = [
+            r"irreparable\s+(harm|injury|damage)",
+            r"immediate\s+and\s+irreparable",
+            r"suffer\s+irreparable"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "Irreparable harm stated", line)
+        return (CheckStatus.FAIL, "Irreparable harm/injury not stated", None)
+
+    # =========================================================================
+    # CERTIFICATE OF NOTICE CHECKS (Items 22-26)
+    # =========================================================================
+
+    def check_certificate_notice(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 22: Certificate of notice efforts included."""
+        patterns = [
+            r"CERTIFICATE\s+OF\s+NOTICE",
+            r"certificate.*notice\s+effort",
+            r"notice\s+effort.*certificate"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "Certificate of notice efforts found", line)
+        return (CheckStatus.FAIL, "Certificate of notice efforts not found", None)
+
+    # =========================================================================
+    # SECURITY/BOND CHECKS (Items 27-30)
+    # =========================================================================
+
+    def check_bond_addressed(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 27: Addresses Rule 65(c) bond requirement."""
+        patterns = [
+            r"65\s*\(c\)",
+            r"security.*bond",
+            r"bond.*security",
+            r"waive.*bond",
+            r"bond.*waive"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "Bond/security requirement addressed", line)
+        return (CheckStatus.FAIL, "Bond/security requirement not addressed", None)
+
+    # =========================================================================
+    # RELIEF REQUESTED CHECKS (Items 31-35)
+    # =========================================================================
+
+    def check_duration_request(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 34: Requests appropriate duration (max 14 days)."""
+        patterns = [
+            r"14\s*days",
+            r"fourteen\s*\(?14\)?\s*days",
+            r"not\s+exceed\s+14"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "14-day duration mentioned", line)
+        return (CheckStatus.WARNING, "14-day duration limit not explicitly stated", None)
+
+    def check_pi_hearing_request(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 35: Requests preliminary injunction hearing."""
+        patterns = [
+            r"preliminary\s+injunction\s+hearing",
+            r"hearing.*preliminary\s+injunction",
+            r"set.*hearing"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "Preliminary injunction hearing requested", line)
+        return (CheckStatus.WARNING, "Preliminary injunction hearing not explicitly requested", None)
+
+    # =========================================================================
+    # VERIFICATION/DECLARATION CHECKS (Items 36-42)
+    # =========================================================================
+
+    def check_declaration_exists(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 36: Declaration/verification included."""
+        patterns = [
+            r"DECLARATION",
+            r"VERIFICATION",
+            r"under\s+penalty\s+of\s+perjury",
+            r"AFFIDAVIT"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "Declaration/verification found", line)
+        return (CheckStatus.FAIL, "Declaration/verification not found", None)
+
+    def check_1746_language(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 37: Contains 28 U.S.C. § 1746 language."""
+        patterns = [
+            r"28\s*U\.S\.C\.\s*§?\s*1746",
+            r"penalty\s+of\s+perjury.*laws.*United\s+States",
+            r"under\s+penalty\s+of\s+perjury"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "28 U.S.C. § 1746 language found", line)
+        return (CheckStatus.FAIL, "28 U.S.C. § 1746 language not found", None)
+
+    def check_true_correct(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 38: True and correct statement."""
+        patterns = [
+            r"true\s+and\s+correct",
+            r"true\s+and\s+accurate"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "'True and correct' statement found", line)
+        return (CheckStatus.FAIL, "'True and correct' statement not found", None)
+
+    def check_personal_knowledge(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 39: Based on personal knowledge."""
+        found, line, _ = self._search_pattern(r"personal\s+knowledge")
+        if found:
+            return (CheckStatus.PASS, "Personal knowledge statement found", line)
+        return (CheckStatus.FAIL, "Personal knowledge statement not found", None)
+
+    def check_declaration_signed(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 40: Declaration signed."""
+        found, line, _ = self._search_pattern(r"/s/\s*\w+")
+        if found:
+            return (CheckStatus.PASS, "Electronic signature found", line)
+        return (CheckStatus.WARNING, "Electronic signature not detected", None)
+
+    # =========================================================================
+    # FORMATTING CHECKS (Items 43-55)
+    # =========================================================================
+
+    def check_page_count(self, max_pages: int = 4) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 54: Motion is 4 pages or less."""
+        # Rough estimate: ~3000 characters per page
+        estimated_pages = len(self.text) // 3000 + 1
+        if estimated_pages <= max_pages:
+            return (CheckStatus.PASS, f"~{estimated_pages} pages (limit: {max_pages})", None)
+        return (
+            CheckStatus.WARNING,
+            f"~{estimated_pages} pages may exceed {max_pages}-page limit",
+            None
+        )
+
+    # =========================================================================
+    # SIGNATURE BLOCK CHECKS (Items 56-64)
+    # =========================================================================
+
+    def check_signature_block(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 56: Signature block at end."""
+        patterns = [
+            r"Respectfully\s+submitted",
+            r"/s/\s*\w+",
+            r"Pro\s*Se\s*Plaintiff"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "Signature block found", line)
+        return (CheckStatus.FAIL, "Signature block not found", None)
+
+    def check_electronic_signature(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 57: Electronic signature present."""
+        found, line, matched = self._search_pattern(r"/s/\s*[\w\s]+")
+        if found:
+            return (CheckStatus.PASS, f"Electronic signature found: {matched.strip()}", line)
+        return (CheckStatus.FAIL, "Electronic signature not found", None)
+
+    def check_phone_number(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 61: Phone number included."""
+        patterns = [
+            r"\(\d{3}\)\s*\d{3}[-.]?\d{4}",
+            r"\d{3}[-.]?\d{3}[-.]?\d{4}"
+        ]
+        for pattern in patterns:
+            found, line, matched = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, f"Phone number found: {matched}", line)
+        return (CheckStatus.FAIL, "Phone number not found", None)
+
+    def check_email_address(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 62: Email address included."""
+        found, line, matched = self._search_pattern(
+            r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+        )
+        if found:
+            return (CheckStatus.PASS, f"Email found: {matched}", line)
+        return (CheckStatus.FAIL, "Email address not found", None)
+
+    def check_pro_se_designation(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 63: Pro Se Plaintiff designation."""
+        found, line, _ = self._search_pattern(r"Pro\s*Se\s*Plaintiff")
+        if found:
+            return (CheckStatus.PASS, "Pro Se Plaintiff designation found", line)
+        return (CheckStatus.FAIL, "Pro Se Plaintiff designation not found", None)
+
+    # =========================================================================
+    # CERTIFICATE OF SERVICE CHECKS (Items 65-73)
+    # =========================================================================
+
+    def check_certificate_service(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 65: Certificate of service included."""
+        found, line, _ = self._search_pattern(r"CERTIFICATE\s+OF\s+SERVICE")
+        if found:
+            return (CheckStatus.PASS, "Certificate of service found", line)
+        return (CheckStatus.FAIL, "Certificate of service not found", None)
+
+    def check_service_method(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 71: Method of service stated."""
+        patterns = [
+            r"(mail|email|electronic|hand.deliver|CM/ECF|certified\s+mail)",
+            r"first.class\s+mail",
+            r"U\.S\.\s+Mail"
+        ]
+        for pattern in patterns:
+            found, line, matched = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, f"Service method found: {matched}", line)
+        return (CheckStatus.FAIL, "Service method not stated", None)
+
+    # =========================================================================
+    # DATE OF FILING CHECKS (Items 74-77)
+    # =========================================================================
+
+    def check_date_line(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 74: Date line present."""
+        patterns = [
+            r"Dated:?\s*\w+\s+\d+",
+            r"Date:?\s*\w+\s+\d+",
+            r"dated\s+this\s+\d+"
+        ]
+        for pattern in patterns:
+            found, line, matched = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, f"Date line found: {matched}", line)
+        return (CheckStatus.FAIL, "Date line not found", None)
+
+    # =========================================================================
+    # EXHIBITS CHECKS (Items 78-86)
+    # =========================================================================
+
+    def check_proposed_order(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 79: Proposed order attached."""
+        patterns = [
+            r"PROPOSED\s+ORDER",
+            r"ORDER\s+GRANTING",
+            r"ORDER.*TEMPORARY\s+RESTRAINING"
+        ]
+        for pattern in patterns:
+            found, line, _ = self._search_pattern(pattern)
+            if found:
+                return (CheckStatus.PASS, "Proposed order reference found", line)
+        return (CheckStatus.WARNING, "Proposed order not found in document", None)
+
+    def check_exhibit_labels(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 80: Exhibits properly labeled."""
+        found, line, _ = self._search_pattern(r"Exhibit\s+[A-Z]|EXHIBIT\s+[A-Z]")
+        if found:
+            return (CheckStatus.PASS, "Exhibit labels found", line)
+        return (CheckStatus.WARNING, "No exhibit labels found - may not be needed", None)
+
+    # =========================================================================
+    # URGENT/EMERGENCY CHECKS (Items 98-103)
+    # =========================================================================
+
+    def check_urgent_in_title(self) -> Tuple[CheckStatus, str, Optional[int]]:
+        """Check item 98: URGENT in title if expedited."""
+        # Look in first 10 lines (title area)
+        title_text = '\n'.join(self.lines[:10])
+        match = re.search(r"URGENT", title_text, re.IGNORECASE)
+        if match:
+            line_num = title_text[:match.start()].count('\n') + 1
+            return (CheckStatus.PASS, "URGENT found in title", line_num)
+        return (CheckStatus.WARNING, "URGENT not in title - may not be needed", None)
+
+    # =========================================================================
+    # MAIN RUN METHOD
+    # =========================================================================
+
+    def run_all_checks(self, storage_dir: Optional[Path] = None) -> AuditResult:
+        """
+        Run all auto-checkable items and return results.
+
+        Args:
+            storage_dir: If provided, saves results and updates log in real-time
+
+        Returns:
+            Complete AuditResult with all checked items
+        """
+        result = AuditResult(
+            document_id=self.document_id,
+            document_name=self.document_name,
+            audit_date=datetime.now().isoformat()
+        )
+
+        # Create audit log if storage_dir provided
+        audit_log = None
+        if storage_dir:
+            audit_log = AuditLog.create_new(self.document_id, self.document_name)
+            save_audit_log(audit_log, storage_dir)
+
+        # Method mapping for auto-checkable items
+        check_methods = {
+            1: self.check_court_name,
+            2: self.check_plaintiff_designation,
+            3: self.check_defendant_designation,
+            4: self.check_case_number,
+            5: self.check_motion_title,
+            6: self.check_rule_65_in_title,
+            7: self.check_ex_parte,
+            8: self.check_urgent_title,
+            9: self.check_emergency_title,
+            10: self.check_movant_identified,
+            11: self.check_pro_se_stated,
+            12: self.check_rule_65b_cited,
+            15: self.check_no_case_citations,
+            21: self.check_irreparable_harm,
+            22: self.check_certificate_notice,
+            27: self.check_bond_addressed,
+            34: self.check_duration_request,
+            35: self.check_pi_hearing_request,
+            36: self.check_declaration_exists,
+            37: self.check_1746_language,
+            38: self.check_true_correct,
+            39: self.check_personal_knowledge,
+            40: self.check_declaration_signed,
+            54: self.check_page_count,
+            56: self.check_signature_block,
+            57: self.check_electronic_signature,
+            61: self.check_phone_number,
+            62: self.check_email_address,
+            63: self.check_pro_se_designation,
+            65: self.check_certificate_service,
+            71: self.check_service_method,
+            74: self.check_date_line,
+            79: self.check_proposed_order,
+            80: self.check_exhibit_labels,
+            98: self.check_urgent_in_title,
+        }
+
+        # Process all checklist items
+        for item in TRO_CHECKLIST:
+            if item.auto_checkable and item.id in check_methods:
+                # Run the check method
+                status, message, line_num = check_methods[item.id]()
+
+                item_result = ItemResult(
+                    item_id=item.id,
+                    category=item.category.value,
+                    description=item.description,
+                    rule_citation=item.rule_citation,
+                    status=status.value,
+                    message=message,
+                    line_number=line_num
+                )
+            else:
+                # Manual review item
+                item_result = ItemResult(
+                    item_id=item.id,
+                    category=item.category.value,
+                    description=item.description,
+                    rule_citation=item.rule_citation,
+                    status=CheckStatus.MANUAL.value,
+                    message="Requires manual review",
+                    line_number=None
+                )
+
+            result.add_result(item_result)
+
+            # Update audit log in real-time
+            if audit_log and storage_dir:
+                audit_log.add_item_result(item_result)
+                save_audit_log(audit_log, storage_dir)
+
+        # Identify critical issues
+        critical_item_ids = [12, 15, 21, 54, 65]  # Rule 65(b), no citations, irreparable harm, page count, COS
+        for item in result.items:
+            if item.item_id in critical_item_ids and item.status == CheckStatus.FAIL.value:
+                result.critical_issues.append(f"#{item.item_id}: {item.message}")
+
+        # Complete the audit log
+        if audit_log and storage_dir:
+            audit_log.complete()
+            save_audit_log(audit_log, storage_dir)
+
+        # Save the full result
+        if storage_dir:
+            save_audit_result(result, storage_dir)
+
+        return result
+
+
+def run_audit(
+    document_text: str,
+    document_id: str,
+    document_name: str,
+    storage_dir: Path
+) -> AuditResult:
+    """
+    Convenience function to run a full audit on a document.
+
+    Args:
+        document_text: The document text content
+        document_id: Document ID
+        document_name: Document name
+        storage_dir: Base storage directory
+
+    Returns:
+        Complete AuditResult
+    """
+    detector = ComplianceDetector(document_text, document_id, document_name)
+    return detector.run_all_checks(storage_dir)
