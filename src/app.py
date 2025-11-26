@@ -1908,6 +1908,7 @@ class MainWindow(QMainWindow):
         accumulated_line_idx = 0
         # Track consecutive <line> tags for extra spacing
         line_tag_count = 0
+        accumulated_extra_lines = 0  # Extra lines for current paragraph
 
         for line_idx, line in enumerate(lines):
             cleaned = line.strip()
@@ -1921,7 +1922,7 @@ class MainWindow(QMainWindow):
                         number=para_num,
                         text=accumulated_text,
                         section_id="",
-                        extra_lines_before=line_tag_count  # Apply pending extra lines
+                        extra_lines_before=accumulated_extra_lines  # Use saved value
                     )
                     self.document.paragraphs[para_num] = para
                     self._para_line_map[para_num] = accumulated_line_idx
@@ -1938,6 +1939,7 @@ class MainWindow(QMainWindow):
 
                     para_num += 1
                     accumulated_text = ""
+                    accumulated_extra_lines = 0  # Reset after flush
                 # Count consecutive <line> tags for NEXT paragraph's extra spacing
                 line_tag_count += 1
                 continue
@@ -1949,7 +1951,7 @@ class MainWindow(QMainWindow):
                         number=para_num,
                         text=accumulated_text,
                         section_id="",
-                        extra_lines_before=line_tag_count
+                        extra_lines_before=accumulated_extra_lines  # Use saved value
                     )
                     self.document.paragraphs[para_num] = para
                     self._para_line_map[para_num] = accumulated_line_idx
@@ -1966,6 +1968,7 @@ class MainWindow(QMainWindow):
 
                     para_num += 1
                     accumulated_text = ""
+                    accumulated_extra_lines = 0  # Reset after flush
                 # Count empty lines as extra spacing too
                 line_tag_count += 1
                 continue
@@ -1975,7 +1978,7 @@ class MainWindow(QMainWindow):
             if match:
                 # Flush accumulated text before section
                 if accumulated_text:
-                    para = Paragraph(number=para_num, text=accumulated_text, section_id="")
+                    para = Paragraph(number=para_num, text=accumulated_text, section_id="", extra_lines_before=accumulated_extra_lines)
                     self.document.paragraphs[para_num] = para
                     self._para_line_map[para_num] = accumulated_line_idx
                     for section, section_line, is_subsection, parent_id in pending_sections:
@@ -1988,6 +1991,7 @@ class MainWindow(QMainWindow):
                     pending_sections.clear()
                     para_num += 1
                     accumulated_text = ""
+                    accumulated_extra_lines = 0  # Reset after flush
 
                 # Parse section content: "I. PARTIES" or "II. JURISDICTION"
                 section_content = match.group(1).strip()
@@ -2020,7 +2024,7 @@ class MainWindow(QMainWindow):
             if subsection_match:
                 # Flush accumulated text before subsection
                 if accumulated_text:
-                    para = Paragraph(number=para_num, text=accumulated_text, section_id="")
+                    para = Paragraph(number=para_num, text=accumulated_text, section_id="", extra_lines_before=accumulated_extra_lines)
                     self.document.paragraphs[para_num] = para
                     self._para_line_map[para_num] = accumulated_line_idx
                     for section, section_line, is_subsection, parent_id in pending_sections:
@@ -2033,6 +2037,7 @@ class MainWindow(QMainWindow):
                     pending_sections.clear()
                     para_num += 1
                     accumulated_text = ""
+                    accumulated_extra_lines = 0  # Reset after flush
                 # Subsections are displayed but don't affect paragraph numbering
                 subsection_content = subsection_match.group(1).strip()
                 # Create section for display with uppercase letter
@@ -2065,7 +2070,7 @@ class MainWindow(QMainWindow):
                     number=para_num,
                     text=accumulated_text,
                     section_id="",
-                    extra_lines_before=line_tag_count
+                    extra_lines_before=accumulated_extra_lines
                 )
                 self.document.paragraphs[para_num] = para
                 self._para_line_map[para_num] = accumulated_line_idx
@@ -2078,7 +2083,11 @@ class MainWindow(QMainWindow):
                     self._all_sections.append((section, para_num, is_subsection, parent_id, display_letter))
                 pending_sections.clear()
                 para_num += 1
+                accumulated_extra_lines = 0  # Reset after flush
 
+            # THE KEY FIX: Save extra lines for THIS paragraph BEFORE resetting
+            # First <line> = normal break (extra=0), two <line> = skip 1 line (extra=1), etc.
+            accumulated_extra_lines = max(0, line_tag_count - 1)
             accumulated_text = cleaned
             accumulated_line_idx = line_idx
             line_tag_count = 0  # Reset for next paragraph
@@ -2089,7 +2098,7 @@ class MainWindow(QMainWindow):
                 number=para_num,
                 text=accumulated_text,
                 section_id="",
-                extra_lines_before=line_tag_count
+                extra_lines_before=accumulated_extra_lines
             )
             self.document.paragraphs[para_num] = para
             self._para_line_map[para_num] = accumulated_line_idx
