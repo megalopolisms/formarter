@@ -138,6 +138,19 @@ def _get_styles(font_name: str) -> dict:
         leftIndent=0.5 * inch,  # All lines start here, first line hangs back
     )
 
+    # Subsection header style (left aligned, italic, uppercase letters)
+    subsection_style = ParagraphStyle(
+        'SubsectionHeader',
+        parent=styles['Normal'],
+        fontName=font_name if font_name == 'Times-Roman' else font_name,
+        fontSize=FONT_SIZE,
+        leading=LINE_SPACING,
+        alignment=TA_LEFT,
+        leftIndent=0,  # Start from left margin (no indent)
+        spaceAfter=0,  # Handled manually
+        spaceBefore=0,  # Handled manually
+    )
+
     # Page number style
     page_num_style = ParagraphStyle(
         'PageNumber',
@@ -149,6 +162,7 @@ def _get_styles(font_name: str) -> dict:
 
     return {
         'section': section_style,
+        'subsection': subsection_style,
         'paragraph': para_style,
         'page_number': page_num_style,
     }
@@ -483,7 +497,8 @@ def generate_pdf(
     global_spacing=None,
     caption=None,
     signature=None,
-    document_title: str = ""
+    document_title: str = "",
+    all_sections: list = None
 ) -> str:
     """
     Generate a PDF document with federal court formatting.
@@ -496,6 +511,7 @@ def generate_pdf(
         caption: CaseCaption object for court header (optional)
         signature: SignatureBlock object for signature and certificate of service (optional)
         document_title: Title of document (e.g., "MOTION", "COMPLAINT") shown after caption
+        all_sections: List of (section, para_num, is_subsection, parent_id, display_letter) tuples
 
     Returns:
         Path to the generated PDF file.
@@ -532,6 +548,16 @@ def generate_pdf(
 
     # Build content
     story = []
+
+    # Build a map of subsections by paragraph number
+    # Format: {para_num: [(section, display_letter), ...]}
+    subsection_map = {}
+    if all_sections:
+        for section, para_num, is_subsection, parent_id, display_letter in all_sections:
+            if is_subsection:
+                if para_num not in subsection_map:
+                    subsection_map[para_num] = []
+                subsection_map[para_num].append((section, display_letter))
 
     # Add caption if provided and has content
     has_caption_or_title = False
@@ -570,7 +596,19 @@ def generate_pdf(
             is_first_para_in_section = True
             is_first_section = False
             is_first_para_after_title = False
-        else:
+
+        # Check if this paragraph has subsections
+        if para_num in subsection_map:
+            for subsection, display_letter in subsection_map[para_num]:
+                # Add subsection header (left aligned, bold, uppercase letters)
+                upper_letter = display_letter.upper()
+                subsection_text = f"<b>{upper_letter}. {subsection.title}</b>"
+                story.append(Spacer(1, LINE_SPACING / 2))
+                story.append(Paragraph(subsection_text, styles['subsection']))
+                story.append(Spacer(1, LINE_SPACING / 4))
+                is_first_para_in_section = True  # Treat first para after subsection like first para in section
+
+        if para_num not in section_starts:
             # Add spacing between paragraphs (not before first para in section or first para after title)
             if story and not is_first_para_in_section and not (is_first_para_after_title and has_caption_or_title and document_title):
                 # Get current section's spacing
@@ -583,8 +621,14 @@ def generate_pdf(
         is_first_para_after_title = False
 
         # Add numbered paragraph
+        # Handle <line> tags: convert to <br/> for ReportLab line breaks
+        text = para.text
+        # Replace <line> tags with a placeholder before escaping
+        text = re.sub(r'<line>', '\x00LINE_BREAK\x00', text, flags=re.IGNORECASE)
         # Escape any HTML-like characters in the text
-        safe_text = para.text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        safe_text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        # Convert placeholder back to <br/> for ReportLab
+        safe_text = safe_text.replace('\x00LINE_BREAK\x00', '<br/>')
         para_text = f"{para.number}.&nbsp;&nbsp;&nbsp;{safe_text}"
         story.append(Paragraph(para_text, styles['paragraph']))
 

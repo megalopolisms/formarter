@@ -80,9 +80,15 @@ class SectionTagHighlighter(QSyntaxHighlighter):
         self.error_format.setForeground(QColor("#D32F2F"))  # Red
         self.error_format.setBackground(QColor("#FFEBEE"))  # Light red background
 
+        # Format for <line> tags
+        self.line_format = QTextCharFormat()
+        self.line_format.setForeground(QColor("#7B1FA2"))  # Purple
+        self.line_format.setFontWeight(QFont.Weight.Light)
+
         # Patterns for valid tags (complete)
         self.section_pattern = re.compile(r'<SECTION>.*?</SECTION>', re.IGNORECASE)
         self.subsection_pattern = re.compile(r'<SUBSECTION>.*?</SUBSECTION>', re.IGNORECASE)
+        self.line_pattern = re.compile(r'<line>', re.IGNORECASE)
 
         # Patterns for malformed tags (opening without closing)
         self.malformed_section = re.compile(r'<SECTION>(?!.*</SECTION>).*$', re.IGNORECASE)
@@ -106,6 +112,62 @@ class SectionTagHighlighter(QSyntaxHighlighter):
         # Highlight malformed subsection tags
         for match in self.malformed_subsection.finditer(text):
             self.setFormat(match.start(), match.end() - match.start(), self.error_format)
+
+        # Highlight <line> tags
+        for match in self.line_pattern.finditer(text):
+            self.setFormat(match.start(), match.end() - match.start(), self.line_format)
+
+
+class LineBreakTextEdit(QTextEdit):
+    """Custom QTextEdit that converts line breaks to <line> tags when pasting.
+
+    When text is pasted from clipboard:
+    - Single newlines within paragraphs are converted to <line> tags
+    - The <line> tag represents a line break in the PDF output
+
+    This allows users to paste multi-line text and have proper line spacing
+    in the exported PDF.
+    """
+
+    def insertFromMimeData(self, source):
+        """Override paste behavior to convert line breaks to <line> tags."""
+        if source.hasText():
+            text = source.text()
+            # Convert newlines to <line> tags
+            # But preserve double newlines (paragraph breaks) as single newlines
+            # So that paragraph detection still works
+            lines = text.split('\n')
+            converted_lines = []
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped:
+                    converted_lines.append(stripped)
+                else:
+                    # Empty line = paragraph break, keep as newline
+                    converted_lines.append('')
+
+            # Join with <line> for non-empty consecutive lines
+            result_parts = []
+            i = 0
+            while i < len(converted_lines):
+                if converted_lines[i] == '':
+                    # Paragraph break - add newline
+                    result_parts.append('\n')
+                    i += 1
+                else:
+                    # Content line
+                    result_parts.append(converted_lines[i])
+                    # Check if next line is also content (not empty)
+                    if i + 1 < len(converted_lines) and converted_lines[i + 1] != '':
+                        result_parts.append('<line>')
+                    i += 1
+
+            converted_text = ''.join(result_parts)
+            # Clean up any double newlines that might have appeared
+            converted_text = re.sub(r'\n{3,}', '\n\n', converted_text)
+            self.insertPlainText(converted_text)
+        else:
+            super().insertFromMimeData(source)
 
 
 class MainWindow(QMainWindow):
@@ -1269,8 +1331,8 @@ class MainWindow(QMainWindow):
         header.setStyleSheet("font-weight: bold; padding: 5px; background: #e8f4e8;")
         layout.addWidget(header)
 
-        # Text editor with Times New Roman font
-        self.text_editor = QTextEdit()
+        # Text editor with Times New Roman font (custom class for <line> handling)
+        self.text_editor = LineBreakTextEdit()
         font = QFont("Times New Roman", 12)
         self.text_editor.setFont(font)
         self.text_editor.setPlaceholderText(
@@ -1868,13 +1930,13 @@ class MainWindow(QMainWindow):
             if subsection_match:
                 # Subsections are displayed but don't affect paragraph numbering
                 subsection_content = subsection_match.group(1).strip()
-                # Create section for display with lowercase letter
+                # Create section for display with uppercase letter
                 parts = subsection_content.split(".", 1)
                 if len(parts) == 2:
-                    letter = parts[0].strip().lower()
+                    letter = parts[0].strip().upper()
                     title = parts[1].strip()
                 else:
-                    letter = "sub"
+                    letter = "SUB"
                     title = subsection_content
 
                 # Use composite ID to avoid collisions: "I-a", "II-a"
@@ -2755,7 +2817,8 @@ class MainWindow(QMainWindow):
                 global_spacing=self._global_spacing,
                 caption=self.document.caption,
                 signature=self.document.signature,
-                document_title=self.document.title
+                document_title=self.document.title,
+                all_sections=self._all_sections
             )
 
             # Open in system PDF viewer (Preview.app on macOS)
@@ -2803,7 +2866,8 @@ class MainWindow(QMainWindow):
                 global_spacing=self._global_spacing,
                 caption=self.document.caption,
                 signature=self.document.signature,
-                document_title=self.document.title
+                document_title=self.document.title,
+                all_sections=self._all_sections
             )
 
             # Show success and offer to open
