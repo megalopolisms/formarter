@@ -2017,6 +2017,9 @@ class MainWindow(QMainWindow):
                 section = Section(id=numeral, title=title.upper())
                 pending_sections.append((section, line_idx, False, None))  # Sections have no parent
                 current_section_id = numeral  # Update current section for subsections
+                # Reset spacing - sections act as boundaries (no carry-over from before)
+                line_tag_count = 0
+                accumulated_extra_lines = 0
                 continue  # Skip paragraph creation for section tag
 
             # Check if this line is a subsection tag
@@ -2061,6 +2064,9 @@ class MainWindow(QMainWindow):
 
                 subsection = Section(id=unique_id, title=title.upper())
                 pending_sections.append((subsection, line_idx, True, parent))
+                # Reset spacing - subsections act as boundaries (no carry-over from before)
+                line_tag_count = 0
+                accumulated_extra_lines = 0
                 continue
 
             # Each text line starts a new paragraph
