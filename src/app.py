@@ -1654,7 +1654,7 @@ class MainWindow(QMainWindow):
             if include_cert:
                 cert_section = f"""
 CERTIFICATE OF SERVICE
-I filed the foregoing in person with the Clerk of Court...
+I filed the foregoing in person with the Clerk... (ECF notification)
 
 _________________________
 {signature.attorney_name}
@@ -1702,9 +1702,16 @@ PDF Generated: {output_path}
             profile_idx = 0
         profile = self.CASE_PROFILES[profile_idx]
 
-        # Create minimal signature block (just need attorney_name for certificate)
+        # Determine filing date
+        if self.quick_print_date_cb.isChecked():
+            filing_date = self.quick_print_date_edit.date().toString("MM/dd/yyyy")
+        else:
+            filing_date = "__BLANK__"
+
+        # Create signature block with date for certificate
         signature = SignatureBlock(
             attorney_name=profile.signature.attorney_name,
+            filing_date=filing_date,
         )
 
         # Generate PDF
@@ -1728,15 +1735,20 @@ PDF Generated: {output_path}
             )
 
             # Show preview
+            from datetime import datetime
+            year = datetime.now().year
+            date_line = f"Dated this ___ day of ____________, {year}." if filing_date == "__BLANK__" else f"Dated this {filing_date}."
             preview_text = f"""
 CERTIFICATE OF SERVICE PREVIEW
 ==============================
 
 CERTIFICATE OF SERVICE
 
-I filed the foregoing in person with the Clerk of Court,
-which will send notification of such filing to all counsel of record.
+I hereby certify that on this date, I filed the foregoing in person
+with the Clerk of Court, which will send notification of such filing
+to all counsel of record via the CM/ECF system.
 
+{date_line}
 
 _________________________
 {signature.attorney_name}

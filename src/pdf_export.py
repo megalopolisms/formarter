@@ -539,11 +539,34 @@ def _build_certificate_only(signature, font_name: str) -> list:
         spaceAfter=0,
     )
 
+    # Left-aligned style for date line
+    sig_style_left = ParagraphStyle(
+        'SignatureBlockLeft',
+        parent=styles['Normal'],
+        fontName=font_name,
+        fontSize=FONT_SIZE,
+        leading=SIG_SINGLE_SPACING,
+        alignment=TA_LEFT,
+        spaceAfter=0,
+    )
+
     # Certificate of Service header
     elements.append(Paragraph("<b>CERTIFICATE OF SERVICE</b>", cert_header_style))
 
-    cert_text = "I filed the foregoing in person with the Clerk of Court, which will send notification of such filing to all counsel of record."
+    cert_text = "I hereby certify that on this date, I filed the foregoing in person with the Clerk of Court, which will send notification of such filing to all counsel of record via the CM/ECF system."
     elements.append(Paragraph(cert_text, cert_body_style))
+
+    # Add date line
+    filing_date = getattr(signature, 'filing_date', '') or ''
+    if filing_date == "__BLANK__":
+        from datetime import datetime
+        year = datetime.now().year
+        elements.append(Spacer(1, SIG_SINGLE_SPACING))
+        elements.append(Paragraph(f"Dated this ___ day of ____________, {year}.", sig_style_left))
+    elif filing_date:
+        formatted_date = _format_date_ordinal(filing_date)
+        elements.append(Spacer(1, SIG_SINGLE_SPACING))
+        elements.append(Paragraph(f"Dated this {formatted_date}.", sig_style_left))
 
     # Add signature line and name
     elements.append(Spacer(1, SIG_SINGLE_SPACING * 3))  # Space for hand signature
