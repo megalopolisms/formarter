@@ -48,10 +48,14 @@ from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage, QIcon, QSy
 from .models import Document, Paragraph, Section, SpacingSettings, CaseCaption, SignatureBlock, CaseProfile
 from .models.saved_document import SavedDocument
 from .models.library_case import LibraryCase, Category, REPORTERS, COURTS
+from .models.document import Tag, PREDEFINED_TAGS, Filing, Case
 from .pdf_export import generate_pdf
 from .storage import DocumentStorage
 from .case_law_extractor import CaseLawExtractor
 from .case_library import CaseLibrary, get_default_library_path
+from .widgets.filing_tree import FilingTreeWidget
+from .widgets.tag_picker import TagPickerDialog
+from .widgets.filter_bar import FilterBar
 
 
 class SectionTagHighlighter(QSyntaxHighlighter):
@@ -1422,7 +1426,7 @@ class MainWindow(QMainWindow):
         return panel
 
     def _create_sidebar_panel(self) -> QWidget:
-        """Create the collapsible sidebar panel with saved documents."""
+        """Create the collapsible sidebar panel with filing tree."""
         panel = QFrame()
         panel.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Sunken)
         panel.setMinimumWidth(150)
@@ -1439,13 +1443,12 @@ class MainWindow(QMainWindow):
         layout.setSpacing(5)
 
         # Header
-        header = QLabel("Saved Documents")
+        header = QLabel("Documents & Filings")
         header.setStyleSheet("font-weight: bold; font-size: 12px; padding: 5px;")
         layout.addWidget(header)
 
         # Storage location indicator
         storage_path = self.storage.get_storage_location()
-        # Show only the folder name, not full path
         folder_name = Path(storage_path).name
         is_dropbox = "Dropbox" in storage_path
         storage_label = QLabel(f"{'Dropbox' if is_dropbox else 'Local'}: {folder_name}")
@@ -1453,41 +1456,74 @@ class MainWindow(QMainWindow):
         storage_label.setToolTip(storage_path)
         layout.addWidget(storage_label)
 
+        # Buttons row
+        btn_layout = QHBoxLayout()
+
         # New document button
-        new_btn = QPushButton("+ New Document")
+        new_btn = QPushButton("+ New")
         new_btn.setStyleSheet("""
             QPushButton {
                 background: #28a745;
                 color: white;
                 border: none;
-                padding: 6px 12px;
+                padding: 6px 10px;
                 border-radius: 4px;
                 font-weight: bold;
+                font-size: 11px;
             }
             QPushButton:hover {
                 background: #218838;
             }
         """)
         new_btn.clicked.connect(self._on_new_document)
-        layout.addWidget(new_btn)
+        btn_layout.addWidget(new_btn)
 
         # Save current button
-        save_btn = QPushButton("Save Current")
+        save_btn = QPushButton("Save")
         save_btn.setStyleSheet("""
             QPushButton {
                 background: #007bff;
                 color: white;
                 border: none;
-                padding: 6px 12px;
+                padding: 6px 10px;
                 border-radius: 4px;
                 font-weight: bold;
+                font-size: 11px;
             }
             QPushButton:hover {
                 background: #0069d9;
             }
         """)
         save_btn.clicked.connect(self._on_save_document)
-        layout.addWidget(save_btn)
+        btn_layout.addWidget(save_btn)
+
+        # New Filing button
+        new_filing_btn = QPushButton("+ Filing")
+        new_filing_btn.setStyleSheet("""
+            QPushButton {
+                background: #6c757d;
+                color: white;
+                border: none;
+                padding: 6px 10px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background: #5a6268;
+            }
+        """)
+        new_filing_btn.clicked.connect(self._on_new_filing)
+        btn_layout.addWidget(new_filing_btn)
+
+        layout.addLayout(btn_layout)
+
+        # Filter bar for tag-based filtering
+        self.filter_bar = FilterBar()
+        self.filter_bar.search_changed.connect(self._on_filter_search_changed)
+        self.filter_bar.filters_changed.connect(self._on_filter_tags_changed)
+        self.filter_bar.cleared.connect(self._on_filters_cleared)
+        layout.addWidget(self.filter_bar)
 
         # Separator
         separator = QFrame()
@@ -1495,7 +1531,17 @@ class MainWindow(QMainWindow):
         separator.setStyleSheet("background: #ccc;")
         layout.addWidget(separator)
 
-        # Document list
+        # Filing Tree (replaces doc_list for hierarchical view)
+        self.filing_tree = FilingTreeWidget()
+        self.filing_tree.document_selected.connect(self._on_filing_tree_document_selected)
+        self.filing_tree.filing_selected.connect(self._on_filing_tree_filing_selected)
+        self.filing_tree.case_selected.connect(self._on_filing_tree_case_selected)
+        self.filing_tree.filing_context_menu.connect(self._on_filing_context_menu)
+        self.filing_tree.document_context_menu.connect(self._on_doc_context_menu)
+        self.filing_tree.case_context_menu.connect(self._on_case_context_menu)
+        layout.addWidget(self.filing_tree)
+
+        # Also keep a simple doc_list for backward compatibility (hidden by default)
         self.doc_list = QListWidget()
         self.doc_list.setStyleSheet("""
             QListWidget {
@@ -1518,9 +1564,362 @@ class MainWindow(QMainWindow):
         self.doc_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.doc_list.customContextMenuRequested.connect(self._on_doc_list_context_menu)
         self.doc_list.itemDoubleClicked.connect(self._on_doc_list_double_click)
+        self.doc_list.hide()  # Hidden by default, filing tree is primary
         layout.addWidget(self.doc_list)
 
+        # Migrate existing documents to filing system on startup
+        self.storage.migrate_to_filing_system()
+
         return panel
+
+    # =========================================================================
+    # FILING SYSTEM METHODS
+    # =========================================================================
+
+    def _on_new_filing(self):
+        """Create a new filing in the current case."""
+        cases = self.storage.get_cases()
+        if not cases:
+            QMessageBox.warning(
+                self, "No Case",
+                "Please create a case first before creating filings."
+            )
+            return
+
+        # Get filing name
+        name, ok = QInputDialog.getText(
+            self, "New Filing", "Filing name:"
+        )
+        if not ok or not name.strip():
+            return
+
+        # If multiple cases, ask which one
+        if len(cases) > 1:
+            case_names = [c.name for c in cases]
+            case_name, ok = QInputDialog.getItem(
+                self, "Select Case", "Create filing in:",
+                case_names, 0, False
+            )
+            if not ok:
+                return
+            case = next(c for c in cases if c.name == case_name)
+        else:
+            case = cases[0]
+
+        # Create filing
+        self.storage.create_filing(name.strip(), case.id)
+        self._refresh_document_list()
+
+    def _on_filing_tree_document_selected(self, doc_id: str):
+        """Handle document selection in filing tree."""
+        doc = self.storage.get_by_id(doc_id)
+        if doc:
+            self._load_doc_to_editor(doc)
+
+    def _on_filing_tree_filing_selected(self, filing_id: str):
+        """Handle filing selection in filing tree."""
+        filing = self.storage.get_filing(filing_id)
+        if filing:
+            # Show filing info in status or a panel
+            pass  # Future: show filing details panel
+
+    def _on_filing_tree_case_selected(self, case_id: str):
+        """Handle case selection in filing tree."""
+        pass  # Future: show case details
+
+    def _on_filing_context_menu(self, filing_id: str, pos):
+        """Show context menu for filing."""
+        menu = QMenu(self)
+
+        # Add Tag
+        add_tag_action = menu.addAction("Add Tag...")
+        add_tag_action.triggered.connect(lambda: self._add_tag_to_filing(filing_id))
+
+        # Add Comment
+        add_comment_action = menu.addAction("Add Comment...")
+        add_comment_action.triggered.connect(lambda: self._add_comment_to_filing(filing_id))
+
+        menu.addSeparator()
+
+        # Rename
+        rename_action = menu.addAction("Rename...")
+        rename_action.triggered.connect(lambda: self._rename_filing(filing_id))
+
+        # Set Status
+        status_menu = menu.addMenu("Set Status")
+        for status in ["draft", "pending", "filed"]:
+            action = status_menu.addAction(status.title())
+            action.triggered.connect(lambda checked, s=status: self._set_filing_status(filing_id, s))
+
+        # Set Filing Date
+        set_date_action = menu.addAction("Set Filing Date...")
+        set_date_action.triggered.connect(lambda: self._set_filing_date(filing_id))
+
+        menu.addSeparator()
+
+        # Add Exhibit
+        add_exhibit_action = menu.addAction("Add Exhibit File...")
+        add_exhibit_action.triggered.connect(lambda: self._add_exhibit_to_filing(filing_id))
+
+        # Export All PDFs
+        export_action = menu.addAction("Export All PDFs")
+        export_action.triggered.connect(lambda: self._export_filing_pdfs(filing_id))
+
+        menu.addSeparator()
+
+        # Archive
+        archive_action = menu.addAction("Archive")
+        archive_action.triggered.connect(lambda: self._archive_filing(filing_id))
+
+        # Delete
+        delete_action = menu.addAction("Delete...")
+        delete_action.triggered.connect(lambda: self._delete_filing(filing_id))
+
+        menu.exec(pos)
+
+    def _on_doc_context_menu(self, doc_id: str, pos):
+        """Show context menu for document in filing tree."""
+        menu = QMenu(self)
+
+        # Load
+        load_action = menu.addAction("Open")
+        load_action.triggered.connect(lambda: self._on_filing_tree_document_selected(doc_id))
+
+        menu.addSeparator()
+
+        # Move to Filing
+        move_menu = menu.addMenu("Move to Filing...")
+        cases = self.storage.get_cases()
+        for case in cases:
+            case_menu = move_menu.addMenu(case.name)
+            for filing in case.filings:
+                action = case_menu.addAction(filing.name)
+                action.triggered.connect(
+                    lambda checked, fid=filing.id: self._move_doc_to_filing(doc_id, fid)
+                )
+            # Unfiled option
+            unfiled_action = case_menu.addAction("Unfiled")
+            unfiled_action.triggered.connect(
+                lambda checked, cid=case.id: self._move_doc_to_unfiled(doc_id, cid)
+            )
+
+        menu.addSeparator()
+
+        # Rename
+        rename_action = menu.addAction("Rename...")
+        rename_action.triggered.connect(lambda: self._rename_document(doc_id))
+
+        # Duplicate
+        duplicate_action = menu.addAction("Duplicate")
+        duplicate_action.triggered.connect(lambda: self._duplicate_document(doc_id))
+
+        # Delete
+        delete_action = menu.addAction("Delete...")
+        delete_action.triggered.connect(lambda: self._delete_document(doc_id))
+
+        menu.exec(pos)
+
+    def _on_case_context_menu(self, case_id: str, pos):
+        """Show context menu for case."""
+        menu = QMenu(self)
+
+        # New Filing
+        new_filing_action = menu.addAction("New Filing...")
+        new_filing_action.triggered.connect(lambda: self._create_filing_in_case(case_id))
+
+        menu.addSeparator()
+
+        # Rename Case
+        rename_action = menu.addAction("Rename Case...")
+        rename_action.triggered.connect(lambda: self._rename_case(case_id))
+
+        menu.exec(pos)
+
+    def _add_tag_to_filing(self, filing_id: str):
+        """Add tags to a filing."""
+        filing = self.storage.get_filing(filing_id)
+        if not filing:
+            return
+
+        tags = self.storage.get_tags()
+        dialog = TagPickerDialog(tags, filing.tags, self)
+        dialog.tag_created.connect(
+            lambda tid, name, color: self.storage.save_tag(Tag(tid, name, color, False))
+        )
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            selected_tags = dialog.get_selected_tags()
+            self.storage.set_filing_tags(filing_id, selected_tags)
+            self._refresh_document_list()
+
+    def _add_comment_to_filing(self, filing_id: str):
+        """Add a comment to a filing's log."""
+        text, ok = QInputDialog.getMultiLineText(
+            self, "Add Comment", "Comment:"
+        )
+        if ok and text.strip():
+            self.storage.add_comment_to_filing(filing_id, text.strip())
+
+    def _rename_filing(self, filing_id: str):
+        """Rename a filing."""
+        filing = self.storage.get_filing(filing_id)
+        if not filing:
+            return
+
+        name, ok = QInputDialog.getText(
+            self, "Rename Filing", "New name:", text=filing.name
+        )
+        if ok and name.strip():
+            filing.name = name.strip()
+            self.storage.save_filing(filing)
+            self._refresh_document_list()
+
+    def _set_filing_status(self, filing_id: str, status: str):
+        """Set filing status."""
+        filing = self.storage.get_filing(filing_id)
+        if filing:
+            filing.status = status
+            self.storage.save_filing(filing)
+            self._refresh_document_list()
+
+    def _set_filing_date(self, filing_id: str):
+        """Set filing date."""
+        from PyQt6.QtWidgets import QDateEdit
+        from PyQt6.QtCore import QDate
+
+        filing = self.storage.get_filing(filing_id)
+        if not filing:
+            return
+
+        # Simple date input
+        date_str, ok = QInputDialog.getText(
+            self, "Set Filing Date",
+            "Filing date (MM/DD/YYYY):",
+            text=filing.filing_date
+        )
+        if ok:
+            filing.filing_date = date_str.strip()
+            self.storage.save_filing(filing)
+            self._refresh_document_list()
+
+    def _add_exhibit_to_filing(self, filing_id: str):
+        """Add an exhibit file to a filing."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Exhibit File", "",
+            "All Files (*);;PDF Files (*.pdf);;Images (*.png *.jpg *.jpeg);;Documents (*.doc *.docx)"
+        )
+        if file_path:
+            exhibit = self.storage.add_exhibit_file(filing_id, file_path)
+            if exhibit:
+                self._refresh_document_list()
+                QMessageBox.information(
+                    self, "Exhibit Added",
+                    f"Added exhibit: {exhibit.filename}"
+                )
+
+    def _export_filing_pdfs(self, filing_id: str):
+        """Export all documents in a filing as PDFs."""
+        filing = self.storage.get_filing(filing_id)
+        if not filing or not filing.document_ids:
+            QMessageBox.warning(self, "No Documents", "This filing has no documents.")
+            return
+
+        # Get export directory
+        dir_path = QFileDialog.getExistingDirectory(
+            self, "Select Export Directory"
+        )
+        if not dir_path:
+            return
+
+        exported = 0
+        for doc_id in filing.document_ids:
+            doc = self.storage.get_by_id(doc_id)
+            if doc:
+                # Generate PDF (reuse existing logic)
+                self._load_doc_to_editor(doc)
+                pdf_path = Path(dir_path) / f"{doc.name}.pdf"
+                # Export using existing PDF generation
+                self._on_export_pdf_to_path(str(pdf_path))
+                exported += 1
+
+        QMessageBox.information(
+            self, "Export Complete",
+            f"Exported {exported} document(s) to {dir_path}"
+        )
+
+    def _archive_filing(self, filing_id: str):
+        """Archive a filing (hide from main view)."""
+        filing = self.storage.get_filing(filing_id)
+        if filing:
+            filing.status = "archived"
+            self.storage.save_filing(filing)
+            self._refresh_document_list()
+
+    def _delete_filing(self, filing_id: str):
+        """Delete a filing."""
+        reply = QMessageBox.question(
+            self, "Delete Filing",
+            "Are you sure you want to delete this filing?\n\n"
+            "Documents will be moved to Unfiled.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            filing = self.storage.get_filing(filing_id)
+            if filing:
+                # Move documents to unfiled
+                for doc_id in filing.document_ids:
+                    self.storage.move_document_to_unfiled(doc_id, filing.case_id)
+                # Delete filing
+                self.storage.delete_filing(filing_id)
+                self._refresh_document_list()
+
+    def _move_doc_to_filing(self, doc_id: str, filing_id: str):
+        """Move a document to a filing."""
+        self.storage.move_document_to_filing(doc_id, filing_id)
+        self._refresh_document_list()
+
+    def _move_doc_to_unfiled(self, doc_id: str, case_id: str):
+        """Move a document to unfiled."""
+        self.storage.move_document_to_unfiled(doc_id, case_id)
+        self._refresh_document_list()
+
+    def _create_filing_in_case(self, case_id: str):
+        """Create a new filing in a specific case."""
+        name, ok = QInputDialog.getText(
+            self, "New Filing", "Filing name:"
+        )
+        if ok and name.strip():
+            self.storage.create_filing(name.strip(), case_id)
+            self._refresh_document_list()
+
+    def _rename_case(self, case_id: str):
+        """Rename a case."""
+        cases = self.storage.get_cases()
+        case = next((c for c in cases if c.id == case_id), None)
+        if not case:
+            return
+
+        name, ok = QInputDialog.getText(
+            self, "Rename Case", "New name:", text=case.name
+        )
+        if ok and name.strip():
+            case.name = name.strip()
+            self.storage.save_case(case)
+            self._refresh_document_list()
+
+    def _on_filter_search_changed(self, text: str):
+        """Handle search text change in filter bar."""
+        # TODO: Implement filtering
+        pass
+
+    def _on_filter_tags_changed(self, tag_ids: list):
+        """Handle tag filter change."""
+        # TODO: Implement tag filtering
+        pass
+
+    def _on_filters_cleared(self):
+        """Handle filters cleared."""
+        self._refresh_document_list()
 
     def _toggle_sidebar(self):
         """Toggle sidebar visibility."""
@@ -1558,10 +1957,28 @@ class MainWindow(QMainWindow):
         return d
 
     def _refresh_document_list(self):
-        """Refresh the document list from storage."""
-        self.doc_list.clear()
+        """Refresh the document list and filing tree from storage."""
+        # Get all data
         documents = self.storage.list_all()
+        cases = self.storage.get_cases()
+        tags = self.storage.get_tags()
 
+        # Build document lookup dict
+        doc_dict = {doc.id: {"name": doc.name, "id": doc.id} for doc in documents}
+
+        # Build tag dict
+        tag_dict = {t.id: t for t in tags}
+
+        # Update filing tree
+        if hasattr(self, 'filing_tree'):
+            self.filing_tree.set_data(cases, tag_dict, doc_dict)
+
+        # Update filter bar with available tags
+        if hasattr(self, 'filter_bar'):
+            self.filter_bar.set_tags(tags)
+
+        # Also update doc_list for backward compatibility (hidden by default)
+        self.doc_list.clear()
         for doc in documents:
             item = QListWidgetItem()
 

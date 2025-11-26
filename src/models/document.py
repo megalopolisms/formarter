@@ -232,3 +232,102 @@ class Document:
                         subitem.paragraph_ids[idx] = i
 
         self.paragraphs = new_paragraphs
+
+
+# ============================================================================
+# FILING SYSTEM DATA MODELS
+# ============================================================================
+
+@dataclass
+class Tag:
+    """
+    A tag for categorizing filings/documents.
+    Tags can be predefined (built-in) or custom (user-created).
+    """
+    id: str  # Unique identifier (e.g., "urgent", "custom-123")
+    name: str  # Display name (e.g., "Urgent", "My Custom Tag")
+    color: str  # Hex color code (e.g., "#FF0000")
+    is_predefined: bool = False  # True for built-in tags
+
+
+# Predefined tags available by default
+PREDEFINED_TAGS = [
+    Tag("urgent", "Urgent", "#FF0000", True),
+    Tag("draft", "Draft", "#FFA500", True),
+    Tag("filed", "Filed", "#28A745", True),
+    Tag("pending", "Pending Review", "#FFC107", True),
+    Tag("confidential", "Confidential", "#800080", True),
+    Tag("discovery", "Discovery", "#007BFF", True),
+    Tag("motion", "Motion", "#17A2B8", True),
+    Tag("brief", "Brief", "#6C757D", True),
+    Tag("response", "Response", "#E83E8C", True),
+    Tag("reply", "Reply", "#20C997", True),
+]
+
+
+@dataclass
+class CommentEntry:
+    """
+    A single timestamped comment entry in the dated log.
+    """
+    timestamp: str  # ISO format (e.g., "2024-01-15T10:30:00")
+    text: str  # The comment text
+
+
+@dataclass
+class EditHistoryEntry:
+    """
+    A single entry in the edit history log.
+    Tracks changes made to documents/filings.
+    """
+    timestamp: str  # ISO format
+    action: str  # Action type: "created", "edited", "renamed", "moved", etc.
+    details: str = ""  # Additional details about the change
+
+
+@dataclass
+class ExhibitFile:
+    """
+    An attached exhibit file in a filing.
+    Files are copied to the filing's exhibit folder.
+    """
+    filename: str  # Name of the file (e.g., "contract.pdf")
+    original_path: str  # Original path before copying
+    added_date: str  # ISO format date when added
+    file_type: str  # File extension (e.g., "pdf", "docx")
+
+
+@dataclass
+class Filing:
+    """
+    A filing container for related court documents.
+
+    Filings group related documents (e.g., motion + brief) together.
+    They can have tags, comments, and attached exhibit files.
+    """
+    id: str  # UUID
+    name: str  # Display name (e.g., "TRO Motion")
+    case_id: str  # Parent case reference
+    document_ids: list[str] = field(default_factory=list)  # Document IDs in this filing
+    tags: list[str] = field(default_factory=list)  # Tag IDs
+    main_note: str = ""  # Main notes field
+    comment_log: list[CommentEntry] = field(default_factory=list)  # Dated comment log
+    status: str = "draft"  # Status: "draft", "pending", "filed", "archived"
+    filing_date: str = ""  # Date filed (if applicable)
+    created_date: str = ""  # Date created
+    edit_history: list[EditHistoryEntry] = field(default_factory=list)  # Change log
+    exhibit_files: list[ExhibitFile] = field(default_factory=list)  # Attached files
+
+
+@dataclass
+class Case:
+    """
+    A case containing multiple filings.
+
+    Top level of the hierarchy: Case → Filing → Documents
+    """
+    id: str  # UUID
+    name: str  # Display name (e.g., "Case 178 - Petrini v. Biloxi")
+    case_number: str  # Court case number (e.g., "3:24-cv-00178")
+    filings: list[Filing] = field(default_factory=list)  # Filings in this case
+    unfiled_document_ids: list[str] = field(default_factory=list)  # Documents not in any filing
