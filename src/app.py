@@ -555,9 +555,9 @@ class MainWindow(QMainWindow):
         civil_rules_tab = self._create_civil_rules_subtab()
         self.library_subtabs.addTab(civil_rules_tab, "Civil Rules")
 
-        # Sub-tab 3: Criminal Rules (Fed. R. Crim. P.)
+        # Sub-tab 3: MS Criminal Rules (Mississippi Rules of Criminal Procedure)
         criminal_rules_tab = self._create_criminal_rules_subtab()
-        self.library_subtabs.addTab(criminal_rules_tab, "Criminal Rules")
+        self.library_subtabs.addTab(criminal_rules_tab, "MS Criminal Rules")
 
         main_layout.addWidget(self.library_subtabs)
         return container
@@ -770,7 +770,7 @@ class MainWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setSpacing(10)
 
         # Header
         header = QLabel("Federal Rules of Civil Procedure")
@@ -782,10 +782,10 @@ class MainWindow(QMainWindow):
             "Select a rule to view its full text."
         )
         description.setWordWrap(True)
-        description.setStyleSheet("color: #666; margin-bottom: 10px;")
+        description.setStyleSheet("color: #666;")
         layout.addWidget(description)
 
-        # Search box
+        # Search and Full Text button row
         search_layout = QHBoxLayout()
         search_label = QLabel("Search:")
         search_label.setStyleSheet("font-weight: bold;")
@@ -795,12 +795,30 @@ class MainWindow(QMainWindow):
         self.civil_rules_search.setPlaceholderText("Search rules...")
         self.civil_rules_search.textChanged.connect(self._on_civil_rules_search)
         search_layout.addWidget(self.civil_rules_search)
-        search_layout.addStretch()
+
+        # Full Text button
+        self.civil_full_text_btn = QPushButton("Full Text")
+        self.civil_full_text_btn.setStyleSheet("""
+            QPushButton {
+                background: #5a9fd4;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #4a8fc4;
+            }
+        """)
+        self.civil_full_text_btn.clicked.connect(self._show_civil_full_text)
+        search_layout.addWidget(self.civil_full_text_btn)
         layout.addLayout(search_layout)
 
         # Split view: rules list and rule content
         from PyQt6.QtWidgets import QSplitter
-        splitter = QSplitter()
+        from PyQt6.QtCore import Qt
+        splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Rules list
         self.civil_rules_list = QListWidget()
@@ -838,34 +856,42 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.civil_rule_content)
 
         splitter.setSizes([300, 500])
-        layout.addWidget(splitter)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        layout.addWidget(splitter, 1)  # Stretch factor 1 to fill vertical space
 
         # Load rules
         self._load_civil_rules()
 
         return tab
 
+    def _show_civil_full_text(self):
+        """Show the full text of Federal Rules of Civil Procedure."""
+        if hasattr(self, 'civil_rules_full_text'):
+            self.civil_rules_list.clearSelection()
+            self.civil_rule_content.setPlainText(self.civil_rules_full_text)
+
     def _create_criminal_rules_subtab(self) -> QWidget:
-        """Create the Criminal Rules sub-tab for Federal Rules of Criminal Procedure."""
+        """Create the Criminal Rules sub-tab for Mississippi Rules of Criminal Procedure."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setSpacing(10)
 
         # Header
-        header = QLabel("Federal Rules of Criminal Procedure")
+        header = QLabel("Mississippi Rules of Criminal Procedure")
         header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
         layout.addWidget(header)
 
         description = QLabel(
-            "Browse and search the Federal Rules of Criminal Procedure. "
+            "Browse and search the Mississippi Rules of Criminal Procedure. "
             "Select a rule to view its full text."
         )
         description.setWordWrap(True)
-        description.setStyleSheet("color: #666; margin-bottom: 10px;")
+        description.setStyleSheet("color: #666;")
         layout.addWidget(description)
 
-        # Search box
+        # Search and Full Text button row
         search_layout = QHBoxLayout()
         search_label = QLabel("Search:")
         search_label.setStyleSheet("font-weight: bold;")
@@ -875,12 +901,30 @@ class MainWindow(QMainWindow):
         self.criminal_rules_search.setPlaceholderText("Search rules...")
         self.criminal_rules_search.textChanged.connect(self._on_criminal_rules_search)
         search_layout.addWidget(self.criminal_rules_search)
-        search_layout.addStretch()
+
+        # Full Text button
+        self.criminal_full_text_btn = QPushButton("Full Text")
+        self.criminal_full_text_btn.setStyleSheet("""
+            QPushButton {
+                background: #5a9fd4;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #4a8fc4;
+            }
+        """)
+        self.criminal_full_text_btn.clicked.connect(self._show_criminal_full_text)
+        search_layout.addWidget(self.criminal_full_text_btn)
         layout.addLayout(search_layout)
 
         # Split view: rules list and rule content
         from PyQt6.QtWidgets import QSplitter
-        splitter = QSplitter()
+        from PyQt6.QtCore import Qt
+        splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Rules list
         self.criminal_rules_list = QListWidget()
@@ -918,12 +962,20 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.criminal_rule_content)
 
         splitter.setSizes([300, 500])
-        layout.addWidget(splitter)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
+        layout.addWidget(splitter, 1)  # Stretch factor 1 to fill vertical space
 
         # Load rules
         self._load_criminal_rules()
 
         return tab
+
+    def _show_criminal_full_text(self):
+        """Show the full text of Mississippi Rules of Criminal Procedure."""
+        if hasattr(self, 'criminal_rules_full_text'):
+            self.criminal_rules_list.clearSelection()
+            self.criminal_rule_content.setPlainText(self.criminal_rules_full_text)
 
     def _load_civil_rules(self):
         """Load and parse Federal Rules of Civil Procedure."""
@@ -936,6 +988,7 @@ class MainWindow(QMainWindow):
             return
 
         text = txt_path.read_text(encoding='utf-8')
+        self.civil_rules_full_text = text  # Store full text for "Full Text" view
 
         # Parse rules - find "Rule X. Title" patterns
         # Store rules as (rule_number, title, start_pos, end_pos)
@@ -943,6 +996,8 @@ class MainWindow(QMainWindow):
         rule_pattern = re.compile(r'^Rule (\d+(?:\.\d+)?)\.\s+(.+?)$', re.MULTILINE)
 
         matches = list(rule_pattern.finditer(text))
+        seen_rules = set()
+
         for i, match in enumerate(matches):
             rule_num = match.group(1)
             title = match.group(2).strip()
@@ -953,12 +1008,23 @@ class MainWindow(QMainWindow):
             if match.start() < 25000:  # Approximate position after TOC
                 continue
 
+            # Skip duplicates
+            if rule_num in seen_rules:
+                continue
+            seen_rules.add(rule_num)
+
             rule_content = text[start:end].strip()
             self.civil_rules_data.append({
                 'number': rule_num,
                 'title': title,
                 'content': rule_content
             })
+
+        # Sort rules numerically
+        def sort_key(r):
+            parts = r['number'].split('.')
+            return [int(p) if p.isdigit() else 0 for p in parts]
+        self.civil_rules_data.sort(key=sort_key)
 
         # Add to list widget
         for rule in self.civil_rules_data:
@@ -967,7 +1033,7 @@ class MainWindow(QMainWindow):
             self.civil_rules_list.addItem(item)
 
     def _load_criminal_rules(self):
-        """Load and parse Federal Rules of Criminal Procedure."""
+        """Load and parse Mississippi Rules of Criminal Procedure."""
         import re
         from pathlib import Path
 
@@ -977,21 +1043,43 @@ class MainWindow(QMainWindow):
             return
 
         text = txt_path.read_text(encoding='utf-8')
+        self.criminal_rules_full_text = text  # Store full text for "Full Text" view
 
-        # Parse rules - find "Rule X. Title" patterns
+        # Find where the TOC ends - look for the header before actual content
+        toc_end_marker = "MISSISSIPPI RULES OF CRIMINAL PROCEDURE\nRule 1  General Provisions"
+        toc_end = text.find(toc_end_marker)
+        if toc_end == -1:
+            toc_end = 1100  # Fallback
+
+        # Parse MS rules - format: "Rule X.Y  Title." or "Rule X  Title"
         self.criminal_rules_data = []
-        rule_pattern = re.compile(r'^Rule (\d+(?:\.\d+)?)\.\s+(.+?)$', re.MULTILINE)
+        # Match patterns like "Rule 1.1  Scope." or "Rule 2  Commencement" (2+ spaces)
+        rule_pattern = re.compile(r'^Rule (\d+(?:\.\d+)?)\s{2,}(.+?)\.?$', re.MULTILINE)
 
         matches = list(rule_pattern.finditer(text))
+        seen_rules = set()  # Track seen rules to avoid duplicates
+
         for i, match in enumerate(matches):
             rule_num = match.group(1)
-            title = match.group(2).strip()
+            title = match.group(2).strip().rstrip('.')
             start = match.start()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
 
-            # Skip if this is in the table of contents
-            if match.start() < 15000:  # Approximate position after TOC
+            # Skip TOC entries
+            if match.start() < toc_end:
                 continue
+
+            # Filter out false positives from comments (titles that look like sentences)
+            # Real rule titles start with uppercase and are reasonably short
+            if not title or not title[0].isupper():
+                continue
+            if title.lower().startswith(('is ', 'are ', 'was ', 'were ', 'has ', 'have ', 'and ', 'or ', 'but ', 'the ')):
+                continue
+
+            # Skip duplicate rules (by number only - take the first occurrence)
+            if rule_num in seen_rules:
+                continue
+            seen_rules.add(rule_num)
 
             rule_content = text[start:end].strip()
             self.criminal_rules_data.append({
@@ -1000,9 +1088,15 @@ class MainWindow(QMainWindow):
                 'content': rule_content
             })
 
+        # Sort rules numerically
+        def sort_key(r):
+            parts = r['number'].split('.')
+            return [int(p) for p in parts]
+        self.criminal_rules_data.sort(key=sort_key)
+
         # Add to list widget
         for rule in self.criminal_rules_data:
-            item = QListWidgetItem(f"Rule {rule['number']}. {rule['title']}")
+            item = QListWidgetItem(f"Rule {rule['number']}  {rule['title']}")
             item.setData(256, rule)  # Store rule data
             self.criminal_rules_list.addItem(item)
 
