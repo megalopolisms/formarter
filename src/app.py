@@ -55,6 +55,8 @@ from .pdf_export import generate_pdf
 from .storage import DocumentStorage
 from .case_law_extractor import CaseLawExtractor
 from .case_library import CaseLibrary, get_default_library_path
+from .exhibit_bank import ExhibitBank, get_default_exhibit_path
+from .models.exhibit import Exhibit, ExhibitTag, DEFAULT_TAGS, get_file_type
 from .widgets.filing_tree import FilingTreeWidget
 from .widgets.tag_picker import TagPickerDialog
 from .widgets.filter_bar import FilterBar
@@ -412,6 +414,14 @@ class MainWindow(QMainWindow):
         # Tab 6: Executed Filings (Case 178 - Current Lawsuit)
         filings_tab = self._create_executed_filings_tab()
         self.tab_widget.addTab(filings_tab, "Executed Filings")
+
+        # Tab 7: Exhibit Bank (Document storage for exhibits)
+        exhibit_bank_tab = self._create_exhibit_bank_tab()
+        self.tab_widget.addTab(exhibit_bank_tab, "Exhibit Bank")
+
+        # Tab 8: Dockets (Track case dockets and deadlines)
+        dockets_tab = self._create_dockets_tab()
+        self.tab_widget.addTab(dockets_tab, "Dockets")
 
         main_layout.addWidget(self.tab_widget)
 
@@ -2234,6 +2244,849 @@ class MainWindow(QMainWindow):
         self._refresh_case_filings('178')
 
         return tab
+
+    def _create_exhibit_bank_tab(self) -> QWidget:
+        """Create the Exhibit Bank tab for storing and managing exhibits."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Initialize exhibit bank
+        self.exhibit_bank = ExhibitBank()
+
+        # Header
+        header = QLabel("Exhibit Bank")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        layout.addWidget(header)
+
+        description = QLabel(
+            "Store, organize, and manage exhibits (PDFs, images, documents) for use in filings. "
+            "Add tags for easy searching and create redacted versions when needed."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet("color: #666; margin-bottom: 10px;")
+        layout.addWidget(description)
+
+        # Toolbar with buttons
+        toolbar_layout = QHBoxLayout()
+
+        # Add Exhibit button
+        add_exhibit_btn = QPushButton("+ Add Exhibit")
+        add_exhibit_btn.setStyleSheet("""
+            QPushButton {
+                background: #4a90d9;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #357abd;
+            }
+        """)
+        add_exhibit_btn.clicked.connect(self._on_add_exhibit)
+        toolbar_layout.addWidget(add_exhibit_btn)
+
+        # Manage Tags button
+        manage_tags_btn = QPushButton("Manage Tags")
+        manage_tags_btn.setStyleSheet("""
+            QPushButton {
+                background: #6c757d;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background: #5a6268;
+            }
+        """)
+        manage_tags_btn.clicked.connect(self._on_manage_exhibit_tags)
+        toolbar_layout.addWidget(manage_tags_btn)
+
+        # Refresh button
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background: #28a745;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background: #218838;
+            }
+        """)
+        refresh_btn.clicked.connect(self._refresh_exhibit_list)
+        toolbar_layout.addWidget(refresh_btn)
+
+        toolbar_layout.addStretch()
+
+        # Stats label
+        self.exhibit_stats_label = QLabel("")
+        self.exhibit_stats_label.setStyleSheet("color: #666;")
+        toolbar_layout.addWidget(self.exhibit_stats_label)
+
+        layout.addLayout(toolbar_layout)
+
+        # Filter row
+        filter_layout = QHBoxLayout()
+
+        # Search box
+        search_label = QLabel("Search:")
+        filter_layout.addWidget(search_label)
+
+        self.exhibit_search_edit = QLineEdit()
+        self.exhibit_search_edit.setPlaceholderText("Search by title, description, notes...")
+        self.exhibit_search_edit.textChanged.connect(self._on_exhibit_search_changed)
+        self.exhibit_search_edit.setMaximumWidth(300)
+        filter_layout.addWidget(self.exhibit_search_edit)
+
+        # Tag filter
+        tag_label = QLabel("Tag:")
+        filter_layout.addWidget(tag_label)
+
+        self.exhibit_tag_filter = QComboBox()
+        self.exhibit_tag_filter.addItem("All Tags", "")
+        for tag in self.exhibit_bank.list_tags():
+            self.exhibit_tag_filter.addItem(tag.name, tag.name)
+        self.exhibit_tag_filter.currentIndexChanged.connect(self._on_exhibit_filter_changed)
+        self.exhibit_tag_filter.setMinimumWidth(150)
+        filter_layout.addWidget(self.exhibit_tag_filter)
+
+        # Type filter
+        type_label = QLabel("Type:")
+        filter_layout.addWidget(type_label)
+
+        self.exhibit_type_filter = QComboBox()
+        self.exhibit_type_filter.addItem("All Types", "")
+        self.exhibit_type_filter.addItem("PDF", "pdf")
+        self.exhibit_type_filter.addItem("Image", "image")
+        self.exhibit_type_filter.addItem("Document", "document")
+        self.exhibit_type_filter.addItem("Other", "other")
+        self.exhibit_type_filter.currentIndexChanged.connect(self._on_exhibit_filter_changed)
+        filter_layout.addWidget(self.exhibit_type_filter)
+
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
+
+        # Main content area with splitter
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left side - exhibit list
+        list_widget = QWidget()
+        list_layout = QVBoxLayout(list_widget)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.exhibit_table = QTableWidget()
+        self.exhibit_table.setColumnCount(5)
+        self.exhibit_table.setHorizontalHeaderLabels(["Title", "Type", "Tags", "Date Added", "Size"])
+        self.exhibit_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.exhibit_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.exhibit_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.exhibit_table.horizontalHeader().setStretchLastSection(True)
+        self.exhibit_table.setColumnWidth(0, 250)  # Title
+        self.exhibit_table.setColumnWidth(1, 80)   # Type
+        self.exhibit_table.setColumnWidth(2, 150)  # Tags
+        self.exhibit_table.setColumnWidth(3, 100)  # Date
+        self.exhibit_table.setColumnWidth(4, 80)   # Size
+        self.exhibit_table.itemSelectionChanged.connect(self._on_exhibit_selected)
+        self.exhibit_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.exhibit_table.customContextMenuRequested.connect(self._on_exhibit_context_menu)
+
+        list_layout.addWidget(self.exhibit_table)
+        content_splitter.addWidget(list_widget)
+
+        # Right side - exhibit details/preview
+        detail_widget = QWidget()
+        detail_layout = QVBoxLayout(detail_widget)
+        detail_layout.setContentsMargins(10, 0, 0, 0)
+
+        detail_header = QLabel("Exhibit Details")
+        detail_header.setStyleSheet("font-size: 14px; font-weight: bold;")
+        detail_layout.addWidget(detail_header)
+
+        # Detail fields
+        self.exhibit_detail_title = QLabel("")
+        self.exhibit_detail_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        self.exhibit_detail_title.setWordWrap(True)
+        detail_layout.addWidget(self.exhibit_detail_title)
+
+        self.exhibit_detail_info = QLabel("")
+        self.exhibit_detail_info.setStyleSheet("color: #666;")
+        self.exhibit_detail_info.setWordWrap(True)
+        detail_layout.addWidget(self.exhibit_detail_info)
+
+        # Tags display
+        self.exhibit_detail_tags = QLabel("")
+        self.exhibit_detail_tags.setWordWrap(True)
+        detail_layout.addWidget(self.exhibit_detail_tags)
+
+        # Description
+        desc_label = QLabel("Description:")
+        desc_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        detail_layout.addWidget(desc_label)
+
+        self.exhibit_detail_desc = QLabel("")
+        self.exhibit_detail_desc.setWordWrap(True)
+        self.exhibit_detail_desc.setStyleSheet("color: #333;")
+        detail_layout.addWidget(self.exhibit_detail_desc)
+
+        # Notes
+        notes_label = QLabel("Notes:")
+        notes_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        detail_layout.addWidget(notes_label)
+
+        self.exhibit_detail_notes = QLabel("")
+        self.exhibit_detail_notes.setWordWrap(True)
+        self.exhibit_detail_notes.setStyleSheet("color: #333;")
+        detail_layout.addWidget(self.exhibit_detail_notes)
+
+        # Thumbnail/Preview
+        self.exhibit_thumbnail = QLabel()
+        self.exhibit_thumbnail.setFixedSize(200, 200)
+        self.exhibit_thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.exhibit_thumbnail.setStyleSheet("background: #f0f0f0; border: 1px solid #ddd;")
+        detail_layout.addWidget(self.exhibit_thumbnail)
+
+        # Action buttons
+        action_layout = QHBoxLayout()
+
+        open_btn = QPushButton("Open")
+        open_btn.clicked.connect(self._on_open_exhibit)
+        action_layout.addWidget(open_btn)
+
+        edit_btn = QPushButton("Edit")
+        edit_btn.clicked.connect(self._on_edit_exhibit)
+        action_layout.addWidget(edit_btn)
+
+        delete_btn = QPushButton("Delete")
+        delete_btn.setStyleSheet("QPushButton { color: #dc3545; }")
+        delete_btn.clicked.connect(self._on_delete_exhibit)
+        action_layout.addWidget(delete_btn)
+
+        action_layout.addStretch()
+        detail_layout.addLayout(action_layout)
+
+        detail_layout.addStretch()
+        content_splitter.addWidget(detail_widget)
+
+        # Set splitter sizes
+        content_splitter.setSizes([600, 300])
+        layout.addWidget(content_splitter)
+
+        # Load initial data
+        self._refresh_exhibit_list()
+
+        return tab
+
+    # ========== Exhibit Bank Event Handlers ==========
+
+    def _on_add_exhibit(self):
+        """Add a new exhibit to the bank."""
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select Files to Add",
+            str(Path.home()),
+            "All Files (*);;PDF Files (*.pdf);;Images (*.jpg *.jpeg *.png *.gif *.bmp);;Documents (*.doc *.docx *.txt *.rtf)"
+        )
+
+        if not file_paths:
+            return
+
+        for file_path in file_paths:
+            # Show dialog to get metadata
+            dialog = ExhibitMetadataDialog(self, file_path, self.exhibit_bank.list_tags())
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                try:
+                    exhibit = self.exhibit_bank.add_exhibit(
+                        file_path=file_path,
+                        title=dialog.title,
+                        tags=dialog.tags,
+                        description=dialog.description,
+                        notes=dialog.notes,
+                        source=dialog.source
+                    )
+                    QMessageBox.information(
+                        self, "Success",
+                        f"Added exhibit: {exhibit.title}"
+                    )
+                except Exception as e:
+                    QMessageBox.warning(
+                        self, "Error",
+                        f"Failed to add exhibit: {str(e)}"
+                    )
+
+        self._refresh_exhibit_list()
+
+    def _on_manage_exhibit_tags(self):
+        """Open dialog to manage exhibit tags."""
+        dialog = ManageExhibitTagsDialog(self, self.exhibit_bank)
+        dialog.exec()
+        # Refresh tag filter
+        self.exhibit_tag_filter.clear()
+        self.exhibit_tag_filter.addItem("All Tags", "")
+        for tag in self.exhibit_bank.list_tags():
+            self.exhibit_tag_filter.addItem(tag.name, tag.name)
+
+    def _refresh_exhibit_list(self):
+        """Refresh the exhibit list table."""
+        # Get current filters
+        query = self.exhibit_search_edit.text() if hasattr(self, 'exhibit_search_edit') else ""
+        tag_filter = self.exhibit_tag_filter.currentData() if hasattr(self, 'exhibit_tag_filter') else None
+        type_filter = self.exhibit_type_filter.currentData() if hasattr(self, 'exhibit_type_filter') else None
+
+        # Search exhibits
+        tags = [tag_filter] if tag_filter else None
+        exhibits = self.exhibit_bank.search(query=query, tags=tags, file_type=type_filter if type_filter else None)
+
+        # Update table
+        self.exhibit_table.setRowCount(len(exhibits))
+        for i, exhibit in enumerate(exhibits):
+            # Title
+            title_item = QTableWidgetItem(exhibit.title)
+            title_item.setData(Qt.ItemDataRole.UserRole, exhibit.id)
+            self.exhibit_table.setItem(i, 0, title_item)
+
+            # Type
+            self.exhibit_table.setItem(i, 1, QTableWidgetItem(exhibit.file_type))
+
+            # Tags
+            tags_str = ", ".join(exhibit.tags) if exhibit.tags else ""
+            self.exhibit_table.setItem(i, 2, QTableWidgetItem(tags_str))
+
+            # Date
+            date_str = exhibit.date_added[:10] if exhibit.date_added else ""
+            self.exhibit_table.setItem(i, 3, QTableWidgetItem(date_str))
+
+            # Size
+            size_kb = exhibit.file_size / 1024
+            if size_kb > 1024:
+                size_str = f"{size_kb/1024:.1f} MB"
+            else:
+                size_str = f"{size_kb:.1f} KB"
+            self.exhibit_table.setItem(i, 4, QTableWidgetItem(size_str))
+
+        # Update stats
+        stats = self.exhibit_bank.get_stats()
+        self.exhibit_stats_label.setText(
+            f"{stats['total_exhibits']} exhibits | {stats['total_size_mb']} MB"
+        )
+
+    def _on_exhibit_search_changed(self, text):
+        """Handle search text change."""
+        self._refresh_exhibit_list()
+
+    def _on_exhibit_filter_changed(self, index):
+        """Handle filter change."""
+        self._refresh_exhibit_list()
+
+    def _on_exhibit_selected(self):
+        """Handle exhibit selection."""
+        selected = self.exhibit_table.selectedItems()
+        if not selected:
+            return
+
+        row = selected[0].row()
+        exhibit_id = self.exhibit_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        exhibit = self.exhibit_bank.get_exhibit(exhibit_id)
+
+        if not exhibit:
+            return
+
+        # Update detail view
+        self.exhibit_detail_title.setText(exhibit.title)
+
+        info_parts = [f"Type: {exhibit.file_type}"]
+        if exhibit.page_count:
+            info_parts.append(f"Pages: {exhibit.page_count}")
+        info_parts.append(f"Original: {exhibit.original_filename}")
+        if exhibit.source:
+            info_parts.append(f"Source: {exhibit.source}")
+        self.exhibit_detail_info.setText(" | ".join(info_parts))
+
+        if exhibit.tags:
+            tags_html = " ".join([f'<span style="background: #e0e0e0; padding: 2px 8px; border-radius: 10px; margin-right: 5px;">{t}</span>' for t in exhibit.tags])
+            self.exhibit_detail_tags.setText(tags_html)
+        else:
+            self.exhibit_detail_tags.setText("No tags")
+
+        self.exhibit_detail_desc.setText(exhibit.description or "No description")
+        self.exhibit_detail_notes.setText(exhibit.notes or "No notes")
+
+        # Load thumbnail
+        thumb_path = self.exhibit_bank.get_thumbnail_path(exhibit_id)
+        if thumb_path and thumb_path.exists():
+            pixmap = QPixmap(str(thumb_path))
+            scaled = pixmap.scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.exhibit_thumbnail.setPixmap(scaled)
+        else:
+            self.exhibit_thumbnail.setText(f"[{exhibit.file_type.upper()}]")
+
+        # Store current exhibit ID
+        self._current_exhibit_id = exhibit_id
+
+    def _on_exhibit_context_menu(self, pos):
+        """Show context menu for exhibit."""
+        item = self.exhibit_table.itemAt(pos)
+        if not item:
+            return
+
+        menu = QMenu(self)
+
+        open_action = menu.addAction("Open")
+        open_action.triggered.connect(self._on_open_exhibit)
+
+        edit_action = menu.addAction("Edit Metadata")
+        edit_action.triggered.connect(self._on_edit_exhibit)
+
+        menu.addSeparator()
+
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(self._on_delete_exhibit)
+
+        menu.exec(self.exhibit_table.mapToGlobal(pos))
+
+    def _on_open_exhibit(self):
+        """Open the selected exhibit."""
+        if not hasattr(self, '_current_exhibit_id'):
+            return
+
+        file_path = self.exhibit_bank.get_file_path(self._current_exhibit_id)
+        if file_path and file_path.exists():
+            subprocess.run(['open', str(file_path)])
+
+    def _on_edit_exhibit(self):
+        """Edit the selected exhibit metadata."""
+        if not hasattr(self, '_current_exhibit_id'):
+            return
+
+        exhibit = self.exhibit_bank.get_exhibit(self._current_exhibit_id)
+        if not exhibit:
+            return
+
+        dialog = EditExhibitDialog(self, exhibit, self.exhibit_bank.list_tags())
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.exhibit_bank.update_exhibit(
+                self._current_exhibit_id,
+                title=dialog.title,
+                description=dialog.description,
+                tags=dialog.tags,
+                notes=dialog.notes,
+                source=dialog.source
+            )
+            self._refresh_exhibit_list()
+            self._on_exhibit_selected()
+
+    def _on_delete_exhibit(self):
+        """Delete the selected exhibit."""
+        if not hasattr(self, '_current_exhibit_id'):
+            return
+
+        exhibit = self.exhibit_bank.get_exhibit(self._current_exhibit_id)
+        if not exhibit:
+            return
+
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Delete exhibit '{exhibit.title}'?\n\nThis will remove the file from the exhibit bank.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.exhibit_bank.delete_exhibit(self._current_exhibit_id)
+            self._current_exhibit_id = None
+            self._refresh_exhibit_list()
+            # Clear detail view
+            self.exhibit_detail_title.setText("")
+            self.exhibit_detail_info.setText("")
+            self.exhibit_detail_tags.setText("")
+            self.exhibit_detail_desc.setText("")
+            self.exhibit_detail_notes.setText("")
+            self.exhibit_thumbnail.clear()
+
+    # ========== Dockets Tab ==========
+
+    def _create_dockets_tab(self) -> QWidget:
+        """Create the Dockets tab for tracking case dockets and deadlines."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Header
+        header = QLabel("Case Dockets")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        layout.addWidget(header)
+
+        description = QLabel(
+            "Track court dockets, filing deadlines, and case events. "
+            "Import docket sheets from PACER or add entries manually."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet("color: #666; margin-bottom: 10px;")
+        layout.addWidget(description)
+
+        # Toolbar
+        toolbar_layout = QHBoxLayout()
+
+        # Add Entry button
+        add_entry_btn = QPushButton("+ Add Entry")
+        add_entry_btn.setStyleSheet("""
+            QPushButton {
+                background: #4a90d9;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #357abd;
+            }
+        """)
+        add_entry_btn.clicked.connect(self._on_add_docket_entry)
+        toolbar_layout.addWidget(add_entry_btn)
+
+        # Import PACER button
+        import_btn = QPushButton("Import PACER")
+        import_btn.setStyleSheet("""
+            QPushButton {
+                background: #6c757d;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background: #5a6268;
+            }
+        """)
+        import_btn.clicked.connect(self._on_import_pacer)
+        toolbar_layout.addWidget(import_btn)
+
+        # Refresh button
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background: #28a745;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background: #218838;
+            }
+        """)
+        refresh_btn.clicked.connect(self._refresh_dockets)
+        toolbar_layout.addWidget(refresh_btn)
+
+        toolbar_layout.addStretch()
+        layout.addLayout(toolbar_layout)
+
+        # Filter row
+        filter_layout = QHBoxLayout()
+
+        # Case filter
+        case_label = QLabel("Case:")
+        filter_layout.addWidget(case_label)
+
+        self.docket_case_filter = QComboBox()
+        self.docket_case_filter.addItem("All Cases", "")
+        self.docket_case_filter.addItem("Case 178 (Petrini v. City of Biloxi)", "178")
+        self.docket_case_filter.setMinimumWidth(250)
+        self.docket_case_filter.currentIndexChanged.connect(self._on_docket_filter_changed)
+        filter_layout.addWidget(self.docket_case_filter)
+
+        # Search
+        search_label = QLabel("Search:")
+        filter_layout.addWidget(search_label)
+
+        self.docket_search_edit = QLineEdit()
+        self.docket_search_edit.setPlaceholderText("Search docket entries...")
+        self.docket_search_edit.textChanged.connect(self._on_docket_search_changed)
+        self.docket_search_edit.setMaximumWidth(300)
+        filter_layout.addWidget(self.docket_search_edit)
+
+        filter_layout.addStretch()
+        layout.addLayout(filter_layout)
+
+        # Main content - docket table
+        self.docket_table = QTableWidget()
+        self.docket_table.setColumnCount(5)
+        self.docket_table.setHorizontalHeaderLabels(["#", "Date", "Description", "Document", "Filed By"])
+        self.docket_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.docket_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.docket_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.docket_table.horizontalHeader().setStretchLastSection(True)
+        self.docket_table.setColumnWidth(0, 50)   # #
+        self.docket_table.setColumnWidth(1, 100)  # Date
+        self.docket_table.setColumnWidth(2, 400)  # Description
+        self.docket_table.setColumnWidth(3, 100)  # Document
+        self.docket_table.setColumnWidth(4, 150)  # Filed By
+        self.docket_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.docket_table.customContextMenuRequested.connect(self._on_docket_context_menu)
+        self.docket_table.itemDoubleClicked.connect(self._on_docket_double_click)
+        layout.addWidget(self.docket_table)
+
+        # Upcoming deadlines section
+        deadlines_header = QLabel("Upcoming Deadlines")
+        deadlines_header.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 10px;")
+        layout.addWidget(deadlines_header)
+
+        self.deadlines_list = QListWidget()
+        self.deadlines_list.setMaximumHeight(150)
+        self.deadlines_list.setStyleSheet("""
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #eee;
+            }
+            QListWidget::item:selected {
+                background: #e3f2fd;
+            }
+        """)
+        layout.addWidget(self.deadlines_list)
+
+        # Initialize docket storage
+        self._init_docket_storage()
+
+        # Load initial data
+        self._refresh_dockets()
+
+        return tab
+
+    def _init_docket_storage(self):
+        """Initialize docket storage."""
+        self.docket_storage_path = Path.home() / "Dropbox/Formarter Folder/dockets"
+        self.docket_storage_path.mkdir(parents=True, exist_ok=True)
+        self.docket_index_path = self.docket_storage_path / "index.json"
+
+        if self.docket_index_path.exists():
+            try:
+                import json
+                with open(self.docket_index_path, 'r') as f:
+                    self._docket_data = json.load(f)
+            except:
+                self._docket_data = {"cases": {}, "entries": [], "deadlines": []}
+        else:
+            self._docket_data = {"cases": {}, "entries": [], "deadlines": []}
+            self._save_docket_data()
+
+    def _save_docket_data(self):
+        """Save docket data to disk."""
+        import json
+        with open(self.docket_index_path, 'w') as f:
+            json.dump(self._docket_data, f, indent=2, ensure_ascii=False)
+
+    def _refresh_dockets(self):
+        """Refresh the docket display."""
+        # Get filter
+        case_filter = self.docket_case_filter.currentData() if hasattr(self, 'docket_case_filter') else ""
+        search_query = self.docket_search_edit.text().lower() if hasattr(self, 'docket_search_edit') else ""
+
+        # Filter entries
+        entries = self._docket_data.get("entries", [])
+        if case_filter:
+            entries = [e for e in entries if e.get('case_id') == case_filter]
+        if search_query:
+            entries = [e for e in entries if search_query in e.get('description', '').lower()]
+
+        # Sort by date descending
+        entries = sorted(entries, key=lambda x: x.get('date', ''), reverse=True)
+
+        # Update table
+        self.docket_table.setRowCount(len(entries))
+        for i, entry in enumerate(entries):
+            self.docket_table.setItem(i, 0, QTableWidgetItem(str(entry.get('entry_number', ''))))
+            self.docket_table.setItem(i, 1, QTableWidgetItem(entry.get('date', '')))
+            self.docket_table.setItem(i, 2, QTableWidgetItem(entry.get('description', '')))
+            self.docket_table.setItem(i, 3, QTableWidgetItem(entry.get('document', '')))
+            self.docket_table.setItem(i, 4, QTableWidgetItem(entry.get('filed_by', '')))
+
+            # Store entry ID
+            self.docket_table.item(i, 0).setData(Qt.ItemDataRole.UserRole, entry.get('id'))
+
+        # Update deadlines
+        self._refresh_deadlines()
+
+    def _refresh_deadlines(self):
+        """Refresh the upcoming deadlines list."""
+        self.deadlines_list.clear()
+        deadlines = self._docket_data.get("deadlines", [])
+
+        # Sort by date
+        from datetime import datetime
+        today = datetime.now().date()
+        upcoming = []
+        for d in deadlines:
+            try:
+                deadline_date = datetime.strptime(d.get('date', ''), '%Y-%m-%d').date()
+                if deadline_date >= today:
+                    days_until = (deadline_date - today).days
+                    upcoming.append((days_until, d))
+            except:
+                pass
+
+        upcoming.sort(key=lambda x: x[0])
+
+        for days_until, deadline in upcoming[:10]:
+            if days_until == 0:
+                prefix = "TODAY"
+                color = "#dc3545"
+            elif days_until == 1:
+                prefix = "TOMORROW"
+                color = "#fd7e14"
+            elif days_until <= 7:
+                prefix = f"In {days_until} days"
+                color = "#ffc107"
+            else:
+                prefix = f"In {days_until} days"
+                color = "#28a745"
+
+            item = QListWidgetItem(f"[{prefix}] {deadline.get('description', '')} - {deadline.get('date', '')}")
+            item.setForeground(QColor(color))
+            item.setData(Qt.ItemDataRole.UserRole, deadline.get('id'))
+            self.deadlines_list.addItem(item)
+
+    def _on_add_docket_entry(self):
+        """Add a new docket entry."""
+        dialog = AddDocketEntryDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            import uuid
+            entry = {
+                'id': str(uuid.uuid4()),
+                'case_id': dialog.case_id,
+                'entry_number': dialog.entry_number,
+                'date': dialog.date,
+                'description': dialog.description,
+                'document': dialog.document,
+                'filed_by': dialog.filed_by
+            }
+            self._docket_data['entries'].append(entry)
+
+            # Add deadline if specified
+            if dialog.has_deadline:
+                deadline = {
+                    'id': str(uuid.uuid4()),
+                    'case_id': dialog.case_id,
+                    'date': dialog.deadline_date,
+                    'description': dialog.deadline_description,
+                    'entry_id': entry['id']
+                }
+                self._docket_data['deadlines'].append(deadline)
+
+            self._save_docket_data()
+            self._refresh_dockets()
+
+    def _on_import_pacer(self):
+        """Import docket from PACER HTML file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select PACER Docket File",
+            str(Path.home()),
+            "HTML Files (*.html *.htm);;All Files (*)"
+        )
+
+        if file_path:
+            QMessageBox.information(
+                self, "Import PACER",
+                "PACER import functionality coming soon.\n\n"
+                "For now, you can manually add docket entries."
+            )
+
+    def _on_docket_filter_changed(self, index):
+        """Handle docket filter change."""
+        self._refresh_dockets()
+
+    def _on_docket_search_changed(self, text):
+        """Handle docket search change."""
+        self._refresh_dockets()
+
+    def _on_docket_context_menu(self, pos):
+        """Show context menu for docket entry."""
+        item = self.docket_table.itemAt(pos)
+        if not item:
+            return
+
+        menu = QMenu(self)
+
+        view_action = menu.addAction("View Details")
+        view_action.triggered.connect(self._on_view_docket_entry)
+
+        edit_action = menu.addAction("Edit")
+        edit_action.triggered.connect(self._on_edit_docket_entry)
+
+        menu.addSeparator()
+
+        add_deadline_action = menu.addAction("Add Deadline")
+        add_deadline_action.triggered.connect(self._on_add_deadline_from_entry)
+
+        menu.addSeparator()
+
+        delete_action = menu.addAction("Delete")
+        delete_action.triggered.connect(self._on_delete_docket_entry)
+
+        menu.exec(self.docket_table.mapToGlobal(pos))
+
+    def _on_docket_double_click(self, item):
+        """Handle double-click on docket entry."""
+        self._on_view_docket_entry()
+
+    def _on_view_docket_entry(self):
+        """View docket entry details."""
+        selected = self.docket_table.selectedItems()
+        if not selected:
+            return
+
+        row = selected[0].row()
+        entry_id = self.docket_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+
+        for entry in self._docket_data.get('entries', []):
+            if entry.get('id') == entry_id:
+                QMessageBox.information(
+                    self, "Docket Entry",
+                    f"Entry #{entry.get('entry_number', '')}\n"
+                    f"Date: {entry.get('date', '')}\n"
+                    f"Filed By: {entry.get('filed_by', '')}\n\n"
+                    f"Description:\n{entry.get('description', '')}\n\n"
+                    f"Document: {entry.get('document', '')}"
+                )
+                break
+
+    def _on_edit_docket_entry(self):
+        """Edit docket entry."""
+        QMessageBox.information(self, "Edit", "Edit functionality coming soon.")
+
+    def _on_add_deadline_from_entry(self):
+        """Add deadline from selected entry."""
+        QMessageBox.information(self, "Add Deadline", "Add deadline functionality coming soon.")
+
+    def _on_delete_docket_entry(self):
+        """Delete docket entry."""
+        selected = self.docket_table.selectedItems()
+        if not selected:
+            return
+
+        row = selected[0].row()
+        entry_id = self.docket_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            "Delete this docket entry?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self._docket_data['entries'] = [
+                e for e in self._docket_data.get('entries', [])
+                if e.get('id') != entry_id
+            ]
+            self._save_docket_data()
+            self._refresh_dockets()
 
     def _create_case_content_widget(self, case: dict) -> QWidget:
         """Create the content widget for a single case."""
@@ -6228,4 +7081,342 @@ class EditTagsDialog(QDialog):
             'category_id': self.category_combo.currentData() or "",
             'keywords': keywords
         })
+        self.accept()
+
+
+# ========== Exhibit Bank Dialogs ==========
+
+class ExhibitMetadataDialog(QDialog):
+    """Dialog for entering exhibit metadata when adding new exhibit."""
+
+    def __init__(self, parent, file_path: str, tags: list):
+        super().__init__(parent)
+        self.file_path = file_path
+        self.available_tags = tags
+
+        self.title = ""
+        self.tags = []
+        self.description = ""
+        self.notes = ""
+        self.source = ""
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle("Add Exhibit")
+        self.setMinimumWidth(500)
+
+        layout = QVBoxLayout(self)
+
+        # File info
+        file_label = QLabel(f"File: {Path(self.file_path).name}")
+        file_label.setStyleSheet("color: #666;")
+        layout.addWidget(file_label)
+
+        # Form
+        form = QFormLayout()
+
+        # Title (default to filename without extension)
+        self.title_edit = QLineEdit()
+        default_title = Path(self.file_path).stem.replace('_', ' ').replace('-', ' ')
+        self.title_edit.setText(default_title)
+        form.addRow("Title:", self.title_edit)
+
+        # Tags (checkboxes)
+        tags_widget = QWidget()
+        tags_layout = QGridLayout(tags_widget)
+        tags_layout.setContentsMargins(0, 0, 0, 0)
+        self.tag_checkboxes = {}
+        for i, tag in enumerate(self.available_tags):
+            cb = QCheckBox(tag.name)
+            self.tag_checkboxes[tag.name] = cb
+            tags_layout.addWidget(cb, i // 4, i % 4)
+        form.addRow("Tags:", tags_widget)
+
+        # Description
+        self.desc_edit = QTextEdit()
+        self.desc_edit.setMaximumHeight(80)
+        self.desc_edit.setPlaceholderText("Brief description of the exhibit...")
+        form.addRow("Description:", self.desc_edit)
+
+        # Notes
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setMaximumHeight(80)
+        self.notes_edit.setPlaceholderText("Internal notes (not for court use)...")
+        form.addRow("Notes:", self.notes_edit)
+
+        # Source
+        self.source_edit = QLineEdit()
+        self.source_edit.setPlaceholderText("e.g., Discovery Response, Deposition Exhibit...")
+        form.addRow("Source:", self.source_edit)
+
+        layout.addLayout(form)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _on_accept(self):
+        self.title = self.title_edit.text().strip() or Path(self.file_path).stem
+        self.tags = [name for name, cb in self.tag_checkboxes.items() if cb.isChecked()]
+        self.description = self.desc_edit.toPlainText().strip()
+        self.notes = self.notes_edit.toPlainText().strip()
+        self.source = self.source_edit.text().strip()
+        self.accept()
+
+
+class EditExhibitDialog(QDialog):
+    """Dialog for editing exhibit metadata."""
+
+    def __init__(self, parent, exhibit, tags: list):
+        super().__init__(parent)
+        self.exhibit = exhibit
+        self.available_tags = tags
+
+        self.title = exhibit.title
+        self.tags = list(exhibit.tags)
+        self.description = exhibit.description
+        self.notes = exhibit.notes
+        self.source = exhibit.source
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle("Edit Exhibit")
+        self.setMinimumWidth(500)
+
+        layout = QVBoxLayout(self)
+
+        # Form
+        form = QFormLayout()
+
+        # Title
+        self.title_edit = QLineEdit()
+        self.title_edit.setText(self.exhibit.title)
+        form.addRow("Title:", self.title_edit)
+
+        # Tags (checkboxes)
+        tags_widget = QWidget()
+        tags_layout = QGridLayout(tags_widget)
+        tags_layout.setContentsMargins(0, 0, 0, 0)
+        self.tag_checkboxes = {}
+        for i, tag in enumerate(self.available_tags):
+            cb = QCheckBox(tag.name)
+            cb.setChecked(tag.name in self.exhibit.tags)
+            self.tag_checkboxes[tag.name] = cb
+            tags_layout.addWidget(cb, i // 4, i % 4)
+        form.addRow("Tags:", tags_widget)
+
+        # Description
+        self.desc_edit = QTextEdit()
+        self.desc_edit.setMaximumHeight(80)
+        self.desc_edit.setText(self.exhibit.description)
+        form.addRow("Description:", self.desc_edit)
+
+        # Notes
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setMaximumHeight(80)
+        self.notes_edit.setText(self.exhibit.notes)
+        form.addRow("Notes:", self.notes_edit)
+
+        # Source
+        self.source_edit = QLineEdit()
+        self.source_edit.setText(self.exhibit.source)
+        form.addRow("Source:", self.source_edit)
+
+        layout.addLayout(form)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _on_accept(self):
+        self.title = self.title_edit.text().strip() or self.exhibit.title
+        self.tags = [name for name, cb in self.tag_checkboxes.items() if cb.isChecked()]
+        self.description = self.desc_edit.toPlainText().strip()
+        self.notes = self.notes_edit.toPlainText().strip()
+        self.source = self.source_edit.text().strip()
+        self.accept()
+
+
+class ManageExhibitTagsDialog(QDialog):
+    """Dialog for managing exhibit tags."""
+
+    def __init__(self, parent, exhibit_bank):
+        super().__init__(parent)
+        self.exhibit_bank = exhibit_bank
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle("Manage Tags")
+        self.setMinimumWidth(400)
+        self.setMinimumHeight(300)
+
+        layout = QVBoxLayout(self)
+
+        # Tag list
+        self.tag_list = QListWidget()
+        self._refresh_tags()
+        layout.addWidget(self.tag_list)
+
+        # Add tag row
+        add_layout = QHBoxLayout()
+        self.new_tag_edit = QLineEdit()
+        self.new_tag_edit.setPlaceholderText("New tag name...")
+        add_layout.addWidget(self.new_tag_edit)
+
+        add_btn = QPushButton("Add Tag")
+        add_btn.clicked.connect(self._on_add_tag)
+        add_layout.addWidget(add_btn)
+        layout.addLayout(add_layout)
+
+        # Delete button
+        delete_btn = QPushButton("Delete Selected")
+        delete_btn.clicked.connect(self._on_delete_tag)
+        layout.addWidget(delete_btn)
+
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+
+    def _refresh_tags(self):
+        self.tag_list.clear()
+        for tag in self.exhibit_bank.list_tags():
+            item = QListWidgetItem(tag.name)
+            item.setData(Qt.ItemDataRole.UserRole, tag.id)
+            self.tag_list.addItem(item)
+
+    def _on_add_tag(self):
+        name = self.new_tag_edit.text().strip()
+        if name:
+            self.exhibit_bank.add_tag(name)
+            self.new_tag_edit.clear()
+            self._refresh_tags()
+
+    def _on_delete_tag(self):
+        item = self.tag_list.currentItem()
+        if item:
+            tag_id = item.data(Qt.ItemDataRole.UserRole)
+            self.exhibit_bank.delete_tag(tag_id)
+            self._refresh_tags()
+
+
+# ========== Docket Dialogs ==========
+
+class AddDocketEntryDialog(QDialog):
+    """Dialog for adding a new docket entry."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.case_id = "178"
+        self.entry_number = ""
+        self.date = ""
+        self.description = ""
+        self.document = ""
+        self.filed_by = ""
+        self.has_deadline = False
+        self.deadline_date = ""
+        self.deadline_description = ""
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle("Add Docket Entry")
+        self.setMinimumWidth(500)
+
+        layout = QVBoxLayout(self)
+
+        # Form
+        form = QFormLayout()
+
+        # Case
+        self.case_combo = QComboBox()
+        self.case_combo.addItem("Case 178 (Petrini v. City of Biloxi)", "178")
+        form.addRow("Case:", self.case_combo)
+
+        # Entry number
+        self.entry_number_edit = QLineEdit()
+        self.entry_number_edit.setPlaceholderText("e.g., 178")
+        form.addRow("Entry #:", self.entry_number_edit)
+
+        # Date
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDate(QDate.currentDate())
+        form.addRow("Date:", self.date_edit)
+
+        # Description
+        self.desc_edit = QTextEdit()
+        self.desc_edit.setMaximumHeight(100)
+        self.desc_edit.setPlaceholderText("Enter docket entry description...")
+        form.addRow("Description:", self.desc_edit)
+
+        # Document
+        self.doc_edit = QLineEdit()
+        self.doc_edit.setPlaceholderText("e.g., ECF No. 178")
+        form.addRow("Document:", self.doc_edit)
+
+        # Filed by
+        self.filed_by_edit = QLineEdit()
+        self.filed_by_edit.setPlaceholderText("e.g., Plaintiff, Defendant, Court")
+        form.addRow("Filed By:", self.filed_by_edit)
+
+        layout.addLayout(form)
+
+        # Deadline section
+        deadline_group = QGroupBox("Associated Deadline (Optional)")
+        deadline_layout = QFormLayout(deadline_group)
+
+        self.deadline_check = QCheckBox("Add deadline for this entry")
+        deadline_layout.addRow(self.deadline_check)
+
+        self.deadline_date_edit = QDateEdit()
+        self.deadline_date_edit.setCalendarPopup(True)
+        self.deadline_date_edit.setDate(QDate.currentDate().addDays(30))
+        self.deadline_date_edit.setEnabled(False)
+        deadline_layout.addRow("Deadline Date:", self.deadline_date_edit)
+
+        self.deadline_desc_edit = QLineEdit()
+        self.deadline_desc_edit.setPlaceholderText("e.g., Response to Motion due")
+        self.deadline_desc_edit.setEnabled(False)
+        deadline_layout.addRow("Deadline Description:", self.deadline_desc_edit)
+
+        self.deadline_check.toggled.connect(self._on_deadline_toggled)
+
+        layout.addWidget(deadline_group)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _on_deadline_toggled(self, checked):
+        self.deadline_date_edit.setEnabled(checked)
+        self.deadline_desc_edit.setEnabled(checked)
+
+    def _on_accept(self):
+        self.case_id = self.case_combo.currentData()
+        self.entry_number = self.entry_number_edit.text().strip()
+        self.date = self.date_edit.date().toString("yyyy-MM-dd")
+        self.description = self.desc_edit.toPlainText().strip()
+        self.document = self.doc_edit.text().strip()
+        self.filed_by = self.filed_by_edit.text().strip()
+
+        self.has_deadline = self.deadline_check.isChecked()
+        if self.has_deadline:
+            self.deadline_date = self.deadline_date_edit.date().toString("yyyy-MM-dd")
+            self.deadline_description = self.deadline_desc_edit.text().strip()
+
         self.accept()
