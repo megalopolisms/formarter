@@ -372,6 +372,10 @@ class MainWindow(QMainWindow):
         quick_print_tab = self._create_quick_print_tab()
         self.tab_widget.addTab(quick_print_tab, "Quick Print")
 
+        # Tab 6: Executed Filings (Case 178 - Current Lawsuit)
+        filings_tab = self._create_executed_filings_tab()
+        self.tab_widget.addTab(filings_tab, "Executed Filings")
+
         main_layout.addWidget(self.tab_widget)
 
         # Set main widget as central widget
@@ -2128,6 +2132,165 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.quick_print_preview)
 
         return tab
+
+    def _create_executed_filings_tab(self) -> QWidget:
+        """Create the Executed Filings tab for Case 178 - Petrini v. City of Biloxi."""
+        from pathlib import Path
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        # Case header
+        header = QLabel("Case No. 1:25-cv-00178-LG-RPM — Petrini v. City of Biloxi, Mississippi")
+        header.setStyleSheet("""
+            QLabel {
+                font-size: 16px;
+                font-weight: bold;
+                color: #1565C0;
+                padding: 10px;
+                background-color: #E3F2FD;
+                border-radius: 5px;
+            }
+        """)
+        layout.addWidget(header)
+
+        # Splitter for list and content
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left panel - filing list
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+
+        list_label = QLabel("Filed Documents")
+        list_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        left_layout.addWidget(list_label)
+
+        self.filings_list = QListWidget()
+        self.filings_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 13px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #eee;
+            }
+            QListWidget::item:selected {
+                background-color: #1976D2;
+                color: white;
+            }
+        """)
+        self.filings_list.itemClicked.connect(self._on_filing_selected)
+        left_layout.addWidget(self.filings_list)
+
+        # Refresh button
+        refresh_btn = QPushButton("🔄 Refresh List")
+        refresh_btn.clicked.connect(self._refresh_filings_list)
+        left_layout.addWidget(refresh_btn)
+
+        splitter.addWidget(left_panel)
+
+        # Right panel - content viewer
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        content_label = QLabel("Document Content")
+        content_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        right_layout.addWidget(content_label)
+
+        self.filing_content = QTextEdit()
+        self.filing_content.setReadOnly(True)
+        self.filing_content.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-family: 'Times New Roman', serif;
+                font-size: 12px;
+                background-color: white;
+                line-height: 1.5;
+            }
+        """)
+        self.filing_content.setPlaceholderText("Select a filing from the list to view its content...")
+        right_layout.addWidget(self.filing_content)
+
+        # Open PDF button
+        open_pdf_btn = QPushButton("📄 Open Original PDF")
+        open_pdf_btn.clicked.connect(self._open_selected_filing_pdf)
+        right_layout.addWidget(open_pdf_btn)
+
+        splitter.addWidget(right_panel)
+
+        # Set splitter sizes (30% list, 70% content)
+        splitter.setSizes([300, 700])
+
+        layout.addWidget(splitter)
+
+        # Load filings on creation
+        self._refresh_filings_list()
+
+        return tab
+
+    def _get_filings_folder(self) -> Path:
+        """Get the executed filings folder path."""
+        from pathlib import Path
+        return Path.home() / "Dropbox" / "Formarter Folder" / "executed_filings"
+
+    def _refresh_filings_list(self):
+        """Refresh the list of executed filings."""
+        self.filings_list.clear()
+        filings_folder = self._get_filings_folder()
+
+        if not filings_folder.exists():
+            return
+
+        # Get all PDFs and sort by name
+        pdf_files = sorted(filings_folder.glob("*.pdf"))
+
+        for pdf_path in pdf_files:
+            # Extract filing number from filename (e.g., "178" from "178 SECOND AMMENDMENT.pdf")
+            name = pdf_path.stem
+            item = QListWidgetItem(name)
+            item.setData(Qt.ItemDataRole.UserRole, str(pdf_path))
+            self.filings_list.addItem(item)
+
+        # Select first item if available
+        if self.filings_list.count() > 0:
+            self.filings_list.setCurrentRow(0)
+            self._on_filing_selected(self.filings_list.item(0))
+
+    def _on_filing_selected(self, item):
+        """Handle filing selection - load the text content."""
+        if not item:
+            return
+
+        pdf_path = Path(item.data(Qt.ItemDataRole.UserRole))
+        txt_path = pdf_path.with_suffix('.txt')
+
+        if txt_path.exists():
+            try:
+                content = txt_path.read_text(encoding='utf-8')
+                self.filing_content.setPlainText(content)
+            except Exception as e:
+                self.filing_content.setPlainText(f"Error reading file: {str(e)}")
+        else:
+            self.filing_content.setPlainText("Text file not found. Please extract text from the PDF first.")
+
+    def _open_selected_filing_pdf(self):
+        """Open the selected filing's PDF in the default viewer."""
+        import subprocess
+
+        current_item = self.filings_list.currentItem()
+        if not current_item:
+            return
+
+        pdf_path = current_item.data(Qt.ItemDataRole.UserRole)
+        if pdf_path and Path(pdf_path).exists():
+            subprocess.run(['open', pdf_path])
 
     def _on_quick_print_date_toggle(self, state):
         """Enable/disable date edit based on checkbox."""
