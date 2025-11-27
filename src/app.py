@@ -1105,141 +1105,189 @@ class MainWindow(QMainWindow):
         """Create the Auditor tab for TRO motion compliance checking."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
 
-        # Header
-        header = QLabel("TRO Motion Compliance Auditor")
-        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
-        layout.addWidget(header)
-
-        description = QLabel(
-            "Verify TRO motion documents against the 107-item compliance checklist. "
-            "Select a document and click 'Run Audit' to check compliance with "
-            "Fed. R. Civ. P. 65 and Local Uniform Civil Rules."
-        )
-        description.setWordWrap(True)
-        description.setStyleSheet("color: #666;")
-        layout.addWidget(description)
-
-        # Document selector row
-        selector_layout = QHBoxLayout()
+        # Top bar: Document selector + Options + Run button
+        top_bar = QHBoxLayout()
 
         doc_label = QLabel("Document:")
         doc_label.setStyleSheet("font-weight: bold;")
-        selector_layout.addWidget(doc_label)
+        top_bar.addWidget(doc_label)
 
         self.auditor_doc_dropdown = QComboBox()
-        self.auditor_doc_dropdown.setMinimumWidth(300)
+        self.auditor_doc_dropdown.setMinimumWidth(350)
         self._refresh_auditor_doc_list()
-        selector_layout.addWidget(self.auditor_doc_dropdown)
+        top_bar.addWidget(self.auditor_doc_dropdown)
 
-        audit_btn = QPushButton("Run Audit")
+        # Options checkboxes
+        self.audit_ex_parte_cb = QCheckBox("Ex Parte")
+        self.audit_ex_parte_cb.setToolTip("Check if this is an ex parte motion")
+        top_bar.addWidget(self.audit_ex_parte_cb)
+
+        self.audit_urgent_cb = QCheckBox("Urgent")
+        self.audit_urgent_cb.setToolTip("Check if this requires expedited review")
+        top_bar.addWidget(self.audit_urgent_cb)
+
+        audit_btn = QPushButton("RUN AUDIT")
         audit_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2196F3;
+                background-color: #4CAF50;
                 color: white;
-                padding: 8px 20px;
+                padding: 10px 30px;
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
+                font-size: 14px;
             }
             QPushButton:hover {
-                background-color: #1976D2;
+                background-color: #45a049;
             }
         """)
         audit_btn.clicked.connect(self._on_run_audit)
-        selector_layout.addWidget(audit_btn)
+        top_bar.addWidget(audit_btn)
 
-        # Options checkboxes
-        self.audit_ex_parte_cb = QCheckBox("Ex Parte?")
-        self.audit_ex_parte_cb.setToolTip("Check if this is an ex parte motion (no prior notice to defendants)")
-        selector_layout.addWidget(self.audit_ex_parte_cb)
+        top_bar.addStretch()
+        layout.addLayout(top_bar)
 
-        self.audit_urgent_cb = QCheckBox("Urgent/Emergency?")
-        self.audit_urgent_cb.setToolTip("Check if this requires expedited/emergency review")
-        selector_layout.addWidget(self.audit_urgent_cb)
-
-        selector_layout.addStretch()
-        layout.addLayout(selector_layout)
-
-        # Main content area - splitter with checklist and preview
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Left: Checklist tree
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-
-        checklist_label = QLabel("Compliance Checklist (107 items)")
-        checklist_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        left_layout.addWidget(checklist_label)
-
-        self.checklist_tree = QTreeWidget()
-        self.checklist_tree.setHeaderLabels(["#", "Item", "Status", "Rule"])
-        self.checklist_tree.setColumnWidth(0, 40)
-        self.checklist_tree.setColumnWidth(1, 350)
-        self.checklist_tree.setColumnWidth(2, 80)
-        self.checklist_tree.setColumnWidth(3, 120)
-        self.checklist_tree.itemClicked.connect(self._on_checklist_item_clicked)
-        self.checklist_tree.setStyleSheet("""
-            QTreeWidget {
-                border: 1px solid #ddd;
-                border-radius: 4px;
-            }
-            QTreeWidget::item {
-                padding: 4px;
-            }
-            QTreeWidget::item:selected {
-                background-color: #e3f2fd;
-            }
-        """)
-        self._populate_checklist_tree()
-        left_layout.addWidget(self.checklist_tree)
-
-        splitter.addWidget(left_widget)
-
-        # Right: Document preview + Summary
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Summary panel
-        self.audit_summary = QLabel("No audit run yet. Select a document and click 'Run Audit'.")
+        # Summary bar with score
+        self.audit_summary = QLabel("Select a document and click RUN AUDIT")
         self.audit_summary.setStyleSheet("""
             QLabel {
                 background-color: #f5f5f5;
                 border: 1px solid #ddd;
                 border-radius: 4px;
-                padding: 15px;
-                font-size: 13px;
+                padding: 12px 20px;
+                font-size: 14px;
+                font-weight: bold;
             }
         """)
-        self.audit_summary.setWordWrap(True)
-        self.audit_summary.setMinimumHeight(120)
-        right_layout.addWidget(self.audit_summary)
+        self.audit_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.audit_summary)
 
-        preview_label = QLabel("Document Preview")
-        preview_label.setStyleSheet("font-weight: bold; font-size: 14px; margin-top: 10px;")
-        right_layout.addWidget(preview_label)
+        # Main content: 3-column layout (Pass | Fail | Preview)
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Column 1: PASSED items (green)
+        pass_widget = QWidget()
+        pass_layout = QVBoxLayout(pass_widget)
+        pass_layout.setContentsMargins(0, 0, 0, 0)
+        pass_layout.setSpacing(5)
+
+        pass_header = QLabel("PASSED")
+        pass_header.setStyleSheet("""
+            QLabel {
+                background-color: #4CAF50;
+                color: white;
+                padding: 8px;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 4px 4px 0 0;
+            }
+        """)
+        pass_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pass_layout.addWidget(pass_header)
+
+        self.audit_pass_list = QTreeWidget()
+        self.audit_pass_list.setHeaderLabels(["#", "Item", "Rule"])
+        self.audit_pass_list.setColumnWidth(0, 35)
+        self.audit_pass_list.setColumnWidth(1, 250)
+        self.audit_pass_list.setRootIsDecorated(False)
+        self.audit_pass_list.setStyleSheet("""
+            QTreeWidget {
+                border: 1px solid #4CAF50;
+                border-top: none;
+                background-color: #f1f8e9;
+            }
+            QTreeWidget::item {
+                padding: 3px;
+            }
+        """)
+        pass_layout.addWidget(self.audit_pass_list)
+        main_splitter.addWidget(pass_widget)
+
+        # Column 2: FAILED + WARNING items (red/orange)
+        fail_widget = QWidget()
+        fail_layout = QVBoxLayout(fail_widget)
+        fail_layout.setContentsMargins(0, 0, 0, 0)
+        fail_layout.setSpacing(5)
+
+        fail_header = QLabel("FAILED / WARNINGS")
+        fail_header.setStyleSheet("""
+            QLabel {
+                background-color: #f44336;
+                color: white;
+                padding: 8px;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 4px 4px 0 0;
+            }
+        """)
+        fail_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        fail_layout.addWidget(fail_header)
+
+        self.audit_fail_list = QTreeWidget()
+        self.audit_fail_list.setHeaderLabels(["#", "Item", "Status", "Message"])
+        self.audit_fail_list.setColumnWidth(0, 35)
+        self.audit_fail_list.setColumnWidth(1, 200)
+        self.audit_fail_list.setColumnWidth(2, 60)
+        self.audit_fail_list.setRootIsDecorated(False)
+        self.audit_fail_list.setStyleSheet("""
+            QTreeWidget {
+                border: 1px solid #f44336;
+                border-top: none;
+                background-color: #ffebee;
+            }
+            QTreeWidget::item {
+                padding: 3px;
+            }
+        """)
+        fail_layout.addWidget(self.audit_fail_list)
+        main_splitter.addWidget(fail_widget)
+
+        # Column 3: Document Preview
+        preview_widget = QWidget()
+        preview_layout = QVBoxLayout(preview_widget)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(5)
+
+        preview_header = QLabel("DOCUMENT PREVIEW")
+        preview_header.setStyleSheet("""
+            QLabel {
+                background-color: #2196F3;
+                color: white;
+                padding: 8px;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 4px 4px 0 0;
+            }
+        """)
+        preview_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_layout.addWidget(preview_header)
 
         self.audit_preview = QTextEdit()
         self.audit_preview.setReadOnly(True)
-        self.audit_preview.setPlaceholderText("Document content will appear here after running an audit...")
+        self.audit_preview.setPlaceholderText("Document content will appear here...")
         self.audit_preview.setStyleSheet("""
             QTextEdit {
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                border: 1px solid #2196F3;
+                border-top: none;
                 font-family: 'Courier New', monospace;
-                font-size: 12px;
+                font-size: 11px;
+                background-color: #e3f2fd;
             }
         """)
-        right_layout.addWidget(self.audit_preview)
+        preview_layout.addWidget(self.audit_preview)
+        main_splitter.addWidget(preview_widget)
 
-        splitter.addWidget(right_widget)
-        splitter.setSizes([500, 400])
+        # Set initial sizes (equal thirds)
+        main_splitter.setSizes([300, 300, 400])
 
-        layout.addWidget(splitter)
+        layout.addWidget(main_splitter, 1)  # stretch factor 1 to fill space
+
+        # Keep the old checklist tree for reference (hidden)
+        self.checklist_tree = QTreeWidget()
+        self._populate_checklist_tree()
 
         return tab
 
