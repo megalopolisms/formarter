@@ -1429,79 +1429,81 @@ class MainWindow(QMainWindow):
         # Add PASSED items to left list (sorted by ID)
         for item_id, item_result, checklist_item in sorted(passed_items, key=lambda x: x[0]):
             description = checklist_item.description if checklist_item else f"Item {item_id}"
-            category = checklist_item.category.value if checklist_item else ""
-            list_item = QListWidgetItem(f"#{item_id}: {description}")
-            list_item.setData(Qt.ItemDataRole.UserRole, item_id)
-            list_item.setToolTip(f"{category}\n{item_result.message}")
-            list_item.setBackground(QColor("#e8f5e9"))  # Light green
-            self.audit_pass_list.addItem(list_item)
+            rule = checklist_item.rule_citation if checklist_item else ""
+            tree_item = QTreeWidgetItem([str(item_id), description, rule])
+            tree_item.setData(0, Qt.ItemDataRole.UserRole, item_id)
+            tree_item.setToolTip(1, item_result.message)
+            for col in range(3):
+                tree_item.setBackground(col, QColor("#e8f5e9"))  # Light green
+            self.audit_pass_list.addTopLevelItem(tree_item)
 
         # Add N/A items to pass list
         for item_id, item_result, checklist_item in sorted(na_items, key=lambda x: x[0]):
             description = checklist_item.description if checklist_item else f"Item {item_id}"
-            category = checklist_item.category.value if checklist_item else ""
-            list_item = QListWidgetItem(f"#{item_id}: {description} [N/A]")
-            list_item.setData(Qt.ItemDataRole.UserRole, item_id)
-            list_item.setToolTip(f"{category}\n{item_result.message}")
-            list_item.setBackground(QColor("#f5f5f5"))  # Light gray
-            list_item.setForeground(QColor("#888888"))
-            self.audit_pass_list.addItem(list_item)
+            rule = checklist_item.rule_citation if checklist_item else ""
+            tree_item = QTreeWidgetItem([str(item_id), f"{description} [N/A]", rule])
+            tree_item.setData(0, Qt.ItemDataRole.UserRole, item_id)
+            tree_item.setToolTip(1, item_result.message)
+            for col in range(3):
+                tree_item.setBackground(col, QColor("#f5f5f5"))  # Light gray
+                tree_item.setForeground(col, QColor("#888888"))
+            self.audit_pass_list.addTopLevelItem(tree_item)
 
         # Add FAILED items to right list (sorted by ID, critical first)
-        # Sort failed items: critical first, then by ID
         failed_items_sorted = sorted(
             failed_items,
             key=lambda x: (0 if x[2] and x[2].fail_severity == "critical" else 1, x[0])
         )
         for item_id, item_result, checklist_item in failed_items_sorted:
             description = checklist_item.description if checklist_item else f"Item {item_id}"
-            category = checklist_item.category.value if checklist_item else ""
             severity = checklist_item.fail_severity if checklist_item else "normal"
             success_criteria = checklist_item.success_criteria if checklist_item else ""
 
             # Mark critical items
-            prefix = "CRITICAL " if severity == "critical" else ""
-            list_item = QListWidgetItem(f"{prefix}#{item_id}: {description}")
-            list_item.setData(Qt.ItemDataRole.UserRole, item_id)
-            tooltip = f"{category}\n{item_result.message}"
+            status_text = "CRITICAL" if severity == "critical" else "FAIL"
+            tree_item = QTreeWidgetItem([str(item_id), description, status_text, item_result.message[:50]])
+            tree_item.setData(0, Qt.ItemDataRole.UserRole, item_id)
+            tooltip = item_result.message
             if success_criteria:
                 tooltip += f"\n\nWhat success looks like:\n{success_criteria}"
-            list_item.setToolTip(tooltip)
+            tree_item.setToolTip(1, tooltip)
 
             if severity == "critical":
-                list_item.setBackground(QColor("#ffcdd2"))  # Light red
-                list_item.setForeground(QColor("#c62828"))  # Dark red
+                for col in range(4):
+                    tree_item.setBackground(col, QColor("#ffcdd2"))  # Light red
+                    tree_item.setForeground(col, QColor("#c62828"))  # Dark red
             else:
-                list_item.setBackground(QColor("#ffebee"))  # Very light red
-                list_item.setForeground(QColor("#d32f2f"))
+                for col in range(4):
+                    tree_item.setBackground(col, QColor("#ffebee"))  # Very light red
+                    tree_item.setForeground(col, QColor("#d32f2f"))
 
-            self.audit_fail_list.addItem(list_item)
+            self.audit_fail_list.addTopLevelItem(tree_item)
 
         # Add WARNING items to fail list
         for item_id, item_result, checklist_item in sorted(warning_items, key=lambda x: x[0]):
             description = checklist_item.description if checklist_item else f"Item {item_id}"
-            category = checklist_item.category.value if checklist_item else ""
-            list_item = QListWidgetItem(f"WARN #{item_id}: {description}")
-            list_item.setData(Qt.ItemDataRole.UserRole, item_id)
-            list_item.setToolTip(f"{category}\n{item_result.message}")
-            list_item.setBackground(QColor("#fff9c4"))  # Light yellow
-            list_item.setForeground(QColor("#f57f17"))  # Orange
-            self.audit_fail_list.addItem(list_item)
+            tree_item = QTreeWidgetItem([str(item_id), description, "WARN", item_result.message[:50]])
+            tree_item.setData(0, Qt.ItemDataRole.UserRole, item_id)
+            tree_item.setToolTip(1, item_result.message)
+            for col in range(4):
+                tree_item.setBackground(col, QColor("#fff9c4"))  # Light yellow
+                tree_item.setForeground(col, QColor("#f57f17"))  # Orange
+            self.audit_fail_list.addTopLevelItem(tree_item)
 
         # Add MANUAL items to fail list (need attention)
         for item_id, item_result, checklist_item in sorted(manual_items, key=lambda x: x[0]):
             description = checklist_item.description if checklist_item else f"Item {item_id}"
-            category = checklist_item.category.value if checklist_item else ""
             success_criteria = checklist_item.success_criteria if checklist_item else ""
-            list_item = QListWidgetItem(f"MANUAL #{item_id}: {description}")
-            list_item.setData(Qt.ItemDataRole.UserRole, item_id)
-            tooltip = f"{category}\n{item_result.message}"
+            tree_item = QTreeWidgetItem([str(item_id), description, "MANUAL", item_result.message[:50]])
+            tree_item.setData(0, Qt.ItemDataRole.UserRole, item_id)
+            tooltip = item_result.message
             if success_criteria:
                 tooltip += f"\n\nWhat success looks like:\n{success_criteria}"
-            list_item.setToolTip(tooltip)
-            list_item.setBackground(QColor("#e0e0e0"))  # Gray
-            list_item.setForeground(QColor("#616161"))
-            self.audit_fail_list.addItem(list_item)
+            tree_item.setToolTip(1, tooltip)
+            for col in range(4):
+                tree_item.setBackground(col, QColor("#e0e0e0"))  # Gray
+                tree_item.setForeground(col, QColor("#616161"))
+            self.audit_fail_list.addTopLevelItem(tree_item)
 
     def _update_audit_summary(self, result: AuditResult):
         """Update the audit summary display."""
