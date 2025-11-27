@@ -2134,29 +2134,100 @@ class MainWindow(QMainWindow):
         return tab
 
     def _create_executed_filings_tab(self) -> QWidget:
-        """Create the Executed Filings tab for Case 178 - Petrini v. City of Biloxi."""
+        """Create the Executed Filings tab with 3 case sub-tabs."""
         from pathlib import Path
+        import json
 
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Define the 3 cases
+        self._lawsuit_cases = [
+            {'id': '178', 'name': 'Petrini v. City of Biloxi', 'number': '1:25-cv-00178-LG-RPM'},
+            {'id': '233', 'name': 'Case 233 (TBD)', 'number': '1:25-cv-00233'},
+            {'id': '254', 'name': 'Case 254 (TBD)', 'number': '1:25-cv-00254'},
+        ]
+
+        # Main case tabs at top level
+        self.case_tabs = QTabWidget()
+        self.case_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: none;
+                background: white;
+            }
+            QTabBar::tab {
+                padding: 10px 20px;
+                margin-right: 3px;
+                background: #E3F2FD;
+                border: 1px solid #1976D2;
+                border-bottom: none;
+                border-radius: 6px 6px 0 0;
+                font-weight: bold;
+                color: #1565C0;
+            }
+            QTabBar::tab:selected {
+                background: #1976D2;
+                color: white;
+            }
+        """)
+
+        # Create a tab for each case
+        self._case_widgets = {}
+        for case in self._lawsuit_cases:
+            case_widget = self._create_case_content_widget(case)
+            self.case_tabs.addTab(case_widget, f"Case {case['id']}")
+            self._case_widgets[case['id']] = case_widget
+
+        layout.addWidget(self.case_tabs)
+
+        # Load timeline data from JSON
+        self._timeline_data = self._load_timeline_data()
+
+        # Initialize current case
+        self._current_case_id = '178'
+        self._refresh_case_filings('178')
+
+        return tab
+
+    def _create_case_content_widget(self, case: dict) -> QWidget:
+        """Create the content widget for a single case."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
         # Main horizontal splitter
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Left panel - filing list (narrow)
+        # Left panel - filing list + search
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(5, 5, 5, 5)
         left_layout.setSpacing(5)
 
+        # Search box
+        search_box = QLineEdit()
+        search_box.setPlaceholderText("Search filings...")
+        search_box.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+        """)
+        search_box.textChanged.connect(lambda text, cid=case['id']: self._on_search_text_changed(cid, text))
+        left_layout.addWidget(search_box)
+        widget.search_box = search_box
+
         list_label = QLabel("Filed Documents")
         list_label.setStyleSheet("font-weight: bold; font-size: 13px; padding: 5px;")
         left_layout.addWidget(list_label)
 
-        self.filings_list = QListWidget()
-        self.filings_list.setStyleSheet("""
+        filings_list = QListWidget()
+        filings_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #ddd;
                 border-radius: 4px;
@@ -2171,191 +2242,409 @@ class MainWindow(QMainWindow):
                 color: white;
             }
         """)
-        self.filings_list.itemClicked.connect(self._on_filing_selected)
-        left_layout.addWidget(self.filings_list)
+        filings_list.itemClicked.connect(lambda item, cid=case['id']: self._on_case_filing_selected(cid, item))
+        left_layout.addWidget(filings_list)
+        widget.filings_list = filings_list
 
         # Buttons row
         btn_row = QHBoxLayout()
         refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self._refresh_filings_list)
+        refresh_btn.clicked.connect(lambda _, cid=case['id']: self._refresh_case_filings(cid))
         btn_row.addWidget(refresh_btn)
         open_pdf_btn = QPushButton("Open PDF")
-        open_pdf_btn.clicked.connect(self._open_selected_filing_pdf)
+        open_pdf_btn.clicked.connect(lambda _, cid=case['id']: self._open_case_filing_pdf(cid))
         btn_row.addWidget(open_pdf_btn)
         left_layout.addLayout(btn_row)
 
         main_splitter.addWidget(left_panel)
 
-        # Right panel - sub-tabs for content
+        # Right panel - sub-tabs
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        # Sub-tab widget
-        self.filing_subtabs = QTabWidget()
-        self.filing_subtabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #ddd;
-                background: white;
-            }
-            QTabBar::tab {
-                padding: 8px 16px;
-                margin-right: 2px;
-                background: #f0f0f0;
-                border: 1px solid #ddd;
-                border-bottom: none;
-                border-radius: 4px 4px 0 0;
-            }
-            QTabBar::tab:selected {
-                background: white;
-                font-weight: bold;
-            }
+        subtabs = QTabWidget()
+        subtabs.setStyleSheet("""
+            QTabWidget::pane { border: 1px solid #ddd; background: white; }
+            QTabBar::tab { padding: 8px 12px; margin-right: 2px; background: #f0f0f0;
+                border: 1px solid #ddd; border-bottom: none; border-radius: 4px 4px 0 0; }
+            QTabBar::tab:selected { background: white; font-weight: bold; }
         """)
+        widget.subtabs = subtabs
 
         # Sub-tab 1: Case Info
         info_tab = QWidget()
         info_layout = QVBoxLayout(info_tab)
         info_layout.setContentsMargins(10, 10, 10, 10)
+        info_text = QTextEdit()
+        info_text.setReadOnly(True)
+        info_text.setStyleSheet("QTextEdit { border: none; font-family: 'Helvetica Neue', Arial; font-size: 13px; }")
+        info_layout.addWidget(info_text)
+        subtabs.addTab(info_tab, "Case Info")
+        widget.info_text = info_text
 
-        self.filing_info_text = QTextEdit()
-        self.filing_info_text.setReadOnly(True)
-        self.filing_info_text.setStyleSheet("""
-            QTextEdit {
-                border: none;
-                font-family: 'Helvetica Neue', Arial, sans-serif;
-                font-size: 13px;
-                background-color: white;
-            }
+        # Sub-tab 2: Paragraphs (NEW)
+        para_tab = QWidget()
+        para_layout = QVBoxLayout(para_tab)
+        para_layout.setContentsMargins(0, 0, 0, 0)
+        para_splitter = QSplitter(Qt.Orientation.Horizontal)
+        para_list = QListWidget()
+        para_list.setStyleSheet("""
+            QListWidget { border: none; border-right: 1px solid #ddd; font-size: 12px; }
+            QListWidget::item { padding: 8px; border-bottom: 1px solid #eee; }
+            QListWidget::item:selected { background-color: #1976D2; color: white; }
         """)
-        info_layout.addWidget(self.filing_info_text)
-        self.filing_subtabs.addTab(info_tab, "Case Info")
+        para_splitter.addWidget(para_list)
+        widget.para_list = para_list
 
-        # Sub-tab 2: Causes of Action (list view like rules)
+        para_detail_widget = QWidget()
+        para_detail_layout = QVBoxLayout(para_detail_widget)
+        para_detail_layout.setContentsMargins(10, 10, 10, 10)
+        para_detail = QTextEdit()
+        para_detail.setReadOnly(True)
+        para_detail.setStyleSheet("QTextEdit { border: none; font-family: 'Times New Roman'; font-size: 13px; }")
+        para_detail_layout.addWidget(para_detail)
+        copy_cite_btn = QPushButton("Copy with Citation")
+        copy_cite_btn.setStyleSheet("QPushButton { background: #4CAF50; color: white; padding: 10px; border-radius: 4px; font-weight: bold; }")
+        copy_cite_btn.clicked.connect(lambda _, cid=case['id']: self._copy_paragraph_citation(cid))
+        para_detail_layout.addWidget(copy_cite_btn)
+        para_splitter.addWidget(para_detail_widget)
+        para_splitter.setSizes([300, 700])
+        widget.para_detail = para_detail
+
+        para_list.itemClicked.connect(lambda item, cid=case['id']: self._on_paragraph_selected(cid, item))
+        para_layout.addWidget(para_splitter)
+        subtabs.addTab(para_tab, "Paragraphs")
+
+        # Sub-tab 3: Timeline (NEW)
+        timeline_tab = QWidget()
+        timeline_layout = QVBoxLayout(timeline_tab)
+        timeline_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Add event form
+        add_event_group = QGroupBox("Add Timeline Event")
+        add_event_layout = QHBoxLayout(add_event_group)
+        date_edit = QDateEdit()
+        date_edit.setCalendarPopup(True)
+        date_edit.setDate(QDate.currentDate())
+        date_edit.setStyleSheet("padding: 5px;")
+        add_event_layout.addWidget(QLabel("Date:"))
+        add_event_layout.addWidget(date_edit)
+        event_input = QLineEdit()
+        event_input.setPlaceholderText("Event description...")
+        add_event_layout.addWidget(event_input)
+        add_btn = QPushButton("Add")
+        add_btn.clicked.connect(lambda _, cid=case['id']: self._add_timeline_event(cid))
+        add_event_layout.addWidget(add_btn)
+        timeline_layout.addWidget(add_event_group)
+        widget.timeline_date = date_edit
+        widget.timeline_event = event_input
+
+        # Timeline list
+        timeline_list = QListWidget()
+        timeline_list.setStyleSheet("""
+            QListWidget { border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
+            QListWidget::item { padding: 10px; border-bottom: 1px solid #eee; }
+        """)
+        timeline_layout.addWidget(timeline_list)
+        widget.timeline_list = timeline_list
+        subtabs.addTab(timeline_tab, "Timeline")
+
+        # Sub-tab 4: Causes of Action
         causes_tab = QWidget()
         causes_layout = QVBoxLayout(causes_tab)
         causes_layout.setContentsMargins(0, 0, 0, 0)
-        causes_layout.setSpacing(0)
-
-        # Splitter for causes list and detail
         causes_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        self.causes_list = QListWidget()
-        self.causes_list.setStyleSheet("""
-            QListWidget {
-                border: none;
-                border-right: 1px solid #ddd;
-                font-size: 12px;
-            }
-            QListWidget::item {
-                padding: 10px;
-                border-bottom: 1px solid #eee;
-            }
-            QListWidget::item:selected {
-                background-color: #1976D2;
-                color: white;
-            }
+        causes_list = QListWidget()
+        causes_list.setStyleSheet("""
+            QListWidget { border: none; border-right: 1px solid #ddd; font-size: 12px; }
+            QListWidget::item { padding: 10px; border-bottom: 1px solid #eee; }
+            QListWidget::item:selected { background-color: #1976D2; color: white; }
         """)
-        self.causes_list.itemClicked.connect(self._on_cause_selected)
-        causes_splitter.addWidget(self.causes_list)
-
-        self.cause_detail = QTextEdit()
-        self.cause_detail.setReadOnly(True)
-        self.cause_detail.setStyleSheet("""
-            QTextEdit {
-                border: none;
-                font-family: 'Times New Roman', serif;
-                font-size: 13px;
-                background-color: white;
-                padding: 10px;
-            }
-        """)
-        causes_splitter.addWidget(self.cause_detail)
+        causes_splitter.addWidget(causes_list)
+        cause_detail = QTextEdit()
+        cause_detail.setReadOnly(True)
+        cause_detail.setStyleSheet("QTextEdit { border: none; font-family: 'Times New Roman'; font-size: 13px; padding: 10px; }")
+        causes_splitter.addWidget(cause_detail)
         causes_splitter.setSizes([300, 700])
-
+        causes_list.itemClicked.connect(lambda item: cause_detail.setPlainText(item.data(Qt.ItemDataRole.UserRole) or ''))
         causes_layout.addWidget(causes_splitter)
-        self.filing_subtabs.addTab(causes_tab, "Causes of Action")
+        subtabs.addTab(causes_tab, "Causes")
+        widget.causes_list = causes_list
+        widget.cause_detail = cause_detail
 
-        # Sub-tab 3: Sections
-        sections_tab = QWidget()
-        sections_layout = QVBoxLayout(sections_tab)
-        sections_layout.setContentsMargins(0, 0, 0, 0)
-        sections_layout.setSpacing(0)
-
-        sections_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        self.sections_list = QListWidget()
-        self.sections_list.setStyleSheet("""
-            QListWidget {
-                border: none;
-                border-right: 1px solid #ddd;
-                font-size: 12px;
-            }
-            QListWidget::item {
-                padding: 10px;
-                border-bottom: 1px solid #eee;
-            }
-            QListWidget::item:selected {
-                background-color: #1976D2;
-                color: white;
-            }
-        """)
-        self.sections_list.itemClicked.connect(self._on_section_selected)
-        sections_splitter.addWidget(self.sections_list)
-
-        self.section_detail = QTextEdit()
-        self.section_detail.setReadOnly(True)
-        self.section_detail.setStyleSheet("""
-            QTextEdit {
-                border: none;
-                font-family: 'Times New Roman', serif;
-                font-size: 13px;
-                background-color: white;
-                padding: 10px;
-            }
-        """)
-        sections_splitter.addWidget(self.section_detail)
-        sections_splitter.setSizes([300, 700])
-
-        sections_layout.addWidget(sections_splitter)
-        self.filing_subtabs.addTab(sections_tab, "Sections")
-
-        # Sub-tab 4: Full Text
+        # Sub-tab 5: Full Text
         fulltext_tab = QWidget()
         fulltext_layout = QVBoxLayout(fulltext_tab)
         fulltext_layout.setContentsMargins(0, 0, 0, 0)
+        filing_content = QTextEdit()
+        filing_content.setReadOnly(True)
+        filing_content.setStyleSheet("QTextEdit { border: none; font-family: 'Times New Roman'; font-size: 12px; padding: 15px; }")
+        filing_content.setPlaceholderText("Select a filing to view content...")
+        fulltext_layout.addWidget(filing_content)
+        subtabs.addTab(fulltext_tab, "Full Text")
+        widget.filing_content = filing_content
 
-        self.filing_content = QTextEdit()
-        self.filing_content.setReadOnly(True)
-        self.filing_content.setStyleSheet("""
-            QTextEdit {
-                border: none;
-                font-family: 'Times New Roman', serif;
-                font-size: 12px;
-                background-color: white;
-                padding: 15px;
-            }
-        """)
-        self.filing_content.setPlaceholderText("Select a filing from the list to view its content...")
-        fulltext_layout.addWidget(self.filing_content)
-        self.filing_subtabs.addTab(fulltext_tab, "Full Text")
-
-        right_layout.addWidget(self.filing_subtabs)
+        right_layout.addWidget(subtabs)
         main_splitter.addWidget(right_panel)
-
-        # Set splitter sizes (20% list, 80% content)
         main_splitter.setSizes([200, 800])
-
         layout.addWidget(main_splitter)
 
         # Store parsed data
-        self._filing_causes = []
-        self._filing_sections = []
+        widget._paragraphs = []
+        widget._causes = []
+        widget._current_para_idx = 0
 
-        # Load filings on creation
-        self._refresh_filings_list()
+        return widget
 
-        return tab
+    def _get_case_filings_folder(self, case_id: str) -> Path:
+        """Get filings folder for a specific case."""
+        from pathlib import Path
+        return Path.home() / "Dropbox" / "Formarter Folder" / "executed_filings"
+
+    def _refresh_case_filings(self, case_id: str):
+        """Refresh filings list for a specific case."""
+        widget = self._case_widgets.get(case_id)
+        if not widget:
+            return
+
+        widget.filings_list.clear()
+        folder = self._get_case_filings_folder(case_id)
+        if not folder.exists():
+            folder.mkdir(parents=True, exist_ok=True)
+            return
+
+        # Filter PDFs by case ID prefix
+        for pdf_path in sorted(folder.glob(f"{case_id}*.pdf")):
+            item = QListWidgetItem(pdf_path.stem)
+            item.setData(Qt.ItemDataRole.UserRole, str(pdf_path))
+            widget.filings_list.addItem(item)
+
+        # Auto-select first
+        if widget.filings_list.count() > 0:
+            widget.filings_list.setCurrentRow(0)
+            self._on_case_filing_selected(case_id, widget.filings_list.item(0))
+
+        # Load timeline
+        self._refresh_timeline(case_id)
+
+    def _on_case_filing_selected(self, case_id: str, item):
+        """Handle filing selection for a case."""
+        import re
+        widget = self._case_widgets.get(case_id)
+        if not widget or not item:
+            return
+
+        pdf_path = Path(item.data(Qt.ItemDataRole.UserRole))
+        txt_path = pdf_path.with_suffix('.txt')
+
+        if not txt_path.exists():
+            widget.filing_content.setPlainText("No text file. Extract text from PDF first.")
+            return
+
+        content = txt_path.read_text(encoding='utf-8')
+        widget.filing_content.setPlainText(content)
+
+        # Parse case info
+        self._parse_case_info(widget, content, case_id)
+
+        # Parse paragraphs
+        self._parse_paragraphs(widget, content)
+
+        # Parse causes
+        self._parse_case_causes(widget, content)
+
+    def _parse_paragraphs(self, widget, content: str):
+        """Parse numbered paragraphs from content."""
+        import re
+        widget.para_list.clear()
+        widget._paragraphs = []
+
+        # Match paragraphs like "15. Some text here"
+        pattern = r'^(\d+)\.\s+(.+?)(?=^\d+\.|^[IVX]+\.|^COUNT|$)'
+        matches = list(re.finditer(pattern, content, re.MULTILINE | re.DOTALL))
+
+        for match in matches:
+            para_num = match.group(1)
+            para_text = match.group(2).strip()
+            preview = para_text[:80].replace('\n', ' ') + ('...' if len(para_text) > 80 else '')
+
+            item = QListWidgetItem(f"¶{para_num}. {preview}")
+            item.setData(Qt.ItemDataRole.UserRole, para_text)
+            item.setData(Qt.ItemDataRole.UserRole + 1, para_num)
+            widget.para_list.addItem(item)
+            widget._paragraphs.append({'num': para_num, 'text': para_text})
+
+        if widget.para_list.count() > 0:
+            widget.para_list.setCurrentRow(0)
+            self._on_paragraph_selected_widget(widget, widget.para_list.item(0))
+
+    def _on_paragraph_selected(self, case_id: str, item):
+        """Handle paragraph selection."""
+        widget = self._case_widgets.get(case_id)
+        if widget:
+            self._on_paragraph_selected_widget(widget, item)
+
+    def _on_paragraph_selected_widget(self, widget, item):
+        """Display selected paragraph."""
+        if not item:
+            return
+        text = item.data(Qt.ItemDataRole.UserRole)
+        para_num = item.data(Qt.ItemDataRole.UserRole + 1)
+        widget.para_detail.setPlainText(text)
+        widget._current_para_idx = para_num
+
+    def _copy_paragraph_citation(self, case_id: str):
+        """Copy paragraph with proper legal citation."""
+        from PyQt6.QtWidgets import QApplication
+        widget = self._case_widgets.get(case_id)
+        if not widget:
+            return
+
+        para_num = widget._current_para_idx
+        text = widget.para_detail.toPlainText()
+
+        # Get filing name for citation
+        current = widget.filings_list.currentItem()
+        if current:
+            filename = current.text()
+            # Generate citation: "Second Am. Compl. ¶ 15, ECF No. 178"
+            doc_type = "Compl." if "COMPLAINT" in filename.upper() or "AMMENDMENT" in filename.upper() else "Filing"
+            if "SECOND" in filename.upper():
+                doc_type = "Second Am. Compl."
+            elif "FIRST" in filename.upper() or "AMENDED" in filename.upper():
+                doc_type = "Am. Compl."
+
+            ecf_num = case_id  # Use case ID as ECF for now
+            citation = f"{doc_type} ¶ {para_num}, ECF No. {ecf_num}"
+
+            # Copy to clipboard
+            clipboard = QApplication.clipboard()
+            clipboard.setText(f"{text}\n\n{citation}")
+
+    def _parse_case_info(self, widget, content: str, case_id: str):
+        """Parse and display case info."""
+        import re
+        case_data = next((c for c in self._lawsuit_cases if c['id'] == case_id), None)
+
+        # Extract basic info
+        plaintiffs = []
+        defendants = []
+        lines = content.split('\n')
+
+        for i, line in enumerate(lines[:50]):
+            if 'Plaintiffs' in line:
+                for j in range(max(0, i-3), i):
+                    pline = lines[j].strip()
+                    if pline and 'COURT' not in pline.upper():
+                        if ' and ' in pline:
+                            plaintiffs.extend([p.strip().rstrip(',') for p in pline.split(' and ')])
+                        elif pline:
+                            plaintiffs.append(pline.rstrip(','))
+            if 'Defendants' in line:
+                for j in range(max(0, i-5), i):
+                    dline = lines[j].strip()
+                    if dline and 'v.' not in dline and 'Plaintiffs' not in dline:
+                        for d in dline.split(';'):
+                            d = d.strip().rstrip(',')
+                            if d and 'COURT' not in d.upper():
+                                defendants.append(d)
+
+        html = f"""
+        <h2 style="color: #1565C0;">{case_data['number'] if case_data else case_id}</h2>
+        <h3 style="color: #2E7D32;">Plaintiffs ({len(plaintiffs)})</h3>
+        <ul>{''.join(f'<li>{p}</li>' for p in plaintiffs if p)}</ul>
+        <h3 style="color: #C62828;">Defendants ({len(defendants)})</h3>
+        <ul>{''.join(f'<li>{d}</li>' for d in defendants if d)}</ul>
+        """
+        widget.info_text.setHtml(html)
+
+    def _parse_case_causes(self, widget, content: str):
+        """Parse causes of action."""
+        import re
+        widget.causes_list.clear()
+
+        pattern = r'(COUNT\s+[IVX]+\s*[-–—]\s*.+?)(?=COUNT\s+[IVX]+|VI\.\s+PRAYER|$)'
+        for match in re.finditer(pattern, content, re.DOTALL | re.IGNORECASE):
+            full_text = match.group(1).strip()
+            title_lines = [l.strip() for l in full_text.split('\n')[:2] if l.strip() and not l.strip().isdigit()]
+            title = ' '.join(title_lines)[:80]
+
+            item = QListWidgetItem(title)
+            item.setData(Qt.ItemDataRole.UserRole, full_text)
+            widget.causes_list.addItem(item)
+
+    def _on_search_text_changed(self, case_id: str, text: str):
+        """Handle search text changes."""
+        widget = self._case_widgets.get(case_id)
+        if not widget:
+            return
+
+        search_text = text.lower()
+        for i in range(widget.filings_list.count()):
+            item = widget.filings_list.item(i)
+            item.setHidden(search_text not in item.text().lower())
+
+    def _open_case_filing_pdf(self, case_id: str):
+        """Open selected PDF for a case."""
+        import subprocess
+        widget = self._case_widgets.get(case_id)
+        if not widget:
+            return
+
+        current = widget.filings_list.currentItem()
+        if current:
+            pdf_path = current.data(Qt.ItemDataRole.UserRole)
+            if pdf_path and Path(pdf_path).exists():
+                subprocess.run(['open', pdf_path])
+
+    # Timeline methods
+    def _load_timeline_data(self) -> dict:
+        """Load timeline data from JSON."""
+        import json
+        timeline_file = Path.home() / "Dropbox" / "Formarter Folder" / "executed_filings" / "timeline.json"
+        if timeline_file.exists():
+            return json.loads(timeline_file.read_text())
+        return {'178': [], '233': [], '254': []}
+
+    def _save_timeline_data(self):
+        """Save timeline data to JSON."""
+        import json
+        timeline_file = Path.home() / "Dropbox" / "Formarter Folder" / "executed_filings" / "timeline.json"
+        timeline_file.write_text(json.dumps(self._timeline_data, indent=2))
+
+    def _add_timeline_event(self, case_id: str):
+        """Add event to timeline."""
+        widget = self._case_widgets.get(case_id)
+        if not widget:
+            return
+
+        date_str = widget.timeline_date.date().toString("yyyy-MM-dd")
+        event_text = widget.timeline_event.text().strip()
+        if not event_text:
+            return
+
+        if case_id not in self._timeline_data:
+            self._timeline_data[case_id] = []
+
+        self._timeline_data[case_id].append({'date': date_str, 'event': event_text})
+        self._timeline_data[case_id].sort(key=lambda x: x['date'])
+        self._save_timeline_data()
+        widget.timeline_event.clear()
+        self._refresh_timeline(case_id)
+
+    def _refresh_timeline(self, case_id: str):
+        """Refresh timeline display."""
+        widget = self._case_widgets.get(case_id)
+        if not widget:
+            return
+
+        widget.timeline_list.clear()
+        events = self._timeline_data.get(case_id, [])
+        for ev in events:
+            item = QListWidgetItem(f"{ev['date']}  —  {ev['event']}")
+            widget.timeline_list.addItem(item)
 
     def _get_filings_folder(self) -> Path:
         """Get the executed filings folder path."""
