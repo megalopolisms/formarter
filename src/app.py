@@ -2139,33 +2139,20 @@ class MainWindow(QMainWindow):
 
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Case header
-        header = QLabel("Case No. 1:25-cv-00178-LG-RPM — Petrini v. City of Biloxi, Mississippi")
-        header.setStyleSheet("""
-            QLabel {
-                font-size: 16px;
-                font-weight: bold;
-                color: #1565C0;
-                padding: 10px;
-                background-color: #E3F2FD;
-                border-radius: 5px;
-            }
-        """)
-        layout.addWidget(header)
+        # Main horizontal splitter
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Splitter for list and content
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Left panel - filing list
+        # Left panel - filing list (narrow)
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setContentsMargins(5, 5, 5, 5)
+        left_layout.setSpacing(5)
 
         list_label = QLabel("Filed Documents")
-        list_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        list_label.setStyleSheet("font-weight: bold; font-size: 13px; padding: 5px;")
         left_layout.addWidget(list_label)
 
         self.filings_list = QListWidget()
@@ -2173,10 +2160,10 @@ class MainWindow(QMainWindow):
             QListWidget {
                 border: 1px solid #ddd;
                 border-radius: 4px;
-                font-size: 13px;
+                font-size: 12px;
             }
             QListWidget::item {
-                padding: 8px;
+                padding: 6px;
                 border-bottom: 1px solid #eee;
             }
             QListWidget::item:selected {
@@ -2187,48 +2174,183 @@ class MainWindow(QMainWindow):
         self.filings_list.itemClicked.connect(self._on_filing_selected)
         left_layout.addWidget(self.filings_list)
 
-        # Refresh button
-        refresh_btn = QPushButton("🔄 Refresh List")
+        # Buttons row
+        btn_row = QHBoxLayout()
+        refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self._refresh_filings_list)
-        left_layout.addWidget(refresh_btn)
+        btn_row.addWidget(refresh_btn)
+        open_pdf_btn = QPushButton("Open PDF")
+        open_pdf_btn.clicked.connect(self._open_selected_filing_pdf)
+        btn_row.addWidget(open_pdf_btn)
+        left_layout.addLayout(btn_row)
 
-        splitter.addWidget(left_panel)
+        main_splitter.addWidget(left_panel)
 
-        # Right panel - content viewer
+        # Right panel - sub-tabs for content
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
 
-        content_label = QLabel("Document Content")
-        content_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        right_layout.addWidget(content_label)
+        # Sub-tab widget
+        self.filing_subtabs = QTabWidget()
+        self.filing_subtabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #ddd;
+                background: white;
+            }
+            QTabBar::tab {
+                padding: 8px 16px;
+                margin-right: 2px;
+                background: #f0f0f0;
+                border: 1px solid #ddd;
+                border-bottom: none;
+                border-radius: 4px 4px 0 0;
+            }
+            QTabBar::tab:selected {
+                background: white;
+                font-weight: bold;
+            }
+        """)
+
+        # Sub-tab 1: Case Info
+        info_tab = QWidget()
+        info_layout = QVBoxLayout(info_tab)
+        info_layout.setContentsMargins(10, 10, 10, 10)
+
+        self.filing_info_text = QTextEdit()
+        self.filing_info_text.setReadOnly(True)
+        self.filing_info_text.setStyleSheet("""
+            QTextEdit {
+                border: none;
+                font-family: 'Helvetica Neue', Arial, sans-serif;
+                font-size: 13px;
+                background-color: white;
+            }
+        """)
+        info_layout.addWidget(self.filing_info_text)
+        self.filing_subtabs.addTab(info_tab, "Case Info")
+
+        # Sub-tab 2: Causes of Action (list view like rules)
+        causes_tab = QWidget()
+        causes_layout = QVBoxLayout(causes_tab)
+        causes_layout.setContentsMargins(0, 0, 0, 0)
+        causes_layout.setSpacing(0)
+
+        # Splitter for causes list and detail
+        causes_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        self.causes_list = QListWidget()
+        self.causes_list.setStyleSheet("""
+            QListWidget {
+                border: none;
+                border-right: 1px solid #ddd;
+                font-size: 12px;
+            }
+            QListWidget::item {
+                padding: 10px;
+                border-bottom: 1px solid #eee;
+            }
+            QListWidget::item:selected {
+                background-color: #1976D2;
+                color: white;
+            }
+        """)
+        self.causes_list.itemClicked.connect(self._on_cause_selected)
+        causes_splitter.addWidget(self.causes_list)
+
+        self.cause_detail = QTextEdit()
+        self.cause_detail.setReadOnly(True)
+        self.cause_detail.setStyleSheet("""
+            QTextEdit {
+                border: none;
+                font-family: 'Times New Roman', serif;
+                font-size: 13px;
+                background-color: white;
+                padding: 10px;
+            }
+        """)
+        causes_splitter.addWidget(self.cause_detail)
+        causes_splitter.setSizes([300, 700])
+
+        causes_layout.addWidget(causes_splitter)
+        self.filing_subtabs.addTab(causes_tab, "Causes of Action")
+
+        # Sub-tab 3: Sections
+        sections_tab = QWidget()
+        sections_layout = QVBoxLayout(sections_tab)
+        sections_layout.setContentsMargins(0, 0, 0, 0)
+        sections_layout.setSpacing(0)
+
+        sections_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        self.sections_list = QListWidget()
+        self.sections_list.setStyleSheet("""
+            QListWidget {
+                border: none;
+                border-right: 1px solid #ddd;
+                font-size: 12px;
+            }
+            QListWidget::item {
+                padding: 10px;
+                border-bottom: 1px solid #eee;
+            }
+            QListWidget::item:selected {
+                background-color: #1976D2;
+                color: white;
+            }
+        """)
+        self.sections_list.itemClicked.connect(self._on_section_selected)
+        sections_splitter.addWidget(self.sections_list)
+
+        self.section_detail = QTextEdit()
+        self.section_detail.setReadOnly(True)
+        self.section_detail.setStyleSheet("""
+            QTextEdit {
+                border: none;
+                font-family: 'Times New Roman', serif;
+                font-size: 13px;
+                background-color: white;
+                padding: 10px;
+            }
+        """)
+        sections_splitter.addWidget(self.section_detail)
+        sections_splitter.setSizes([300, 700])
+
+        sections_layout.addWidget(sections_splitter)
+        self.filing_subtabs.addTab(sections_tab, "Sections")
+
+        # Sub-tab 4: Full Text
+        fulltext_tab = QWidget()
+        fulltext_layout = QVBoxLayout(fulltext_tab)
+        fulltext_layout.setContentsMargins(0, 0, 0, 0)
 
         self.filing_content = QTextEdit()
         self.filing_content.setReadOnly(True)
         self.filing_content.setStyleSheet("""
             QTextEdit {
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                border: none;
                 font-family: 'Times New Roman', serif;
                 font-size: 12px;
                 background-color: white;
-                line-height: 1.5;
+                padding: 15px;
             }
         """)
         self.filing_content.setPlaceholderText("Select a filing from the list to view its content...")
-        right_layout.addWidget(self.filing_content)
+        fulltext_layout.addWidget(self.filing_content)
+        self.filing_subtabs.addTab(fulltext_tab, "Full Text")
 
-        # Open PDF button
-        open_pdf_btn = QPushButton("📄 Open Original PDF")
-        open_pdf_btn.clicked.connect(self._open_selected_filing_pdf)
-        right_layout.addWidget(open_pdf_btn)
+        right_layout.addWidget(self.filing_subtabs)
+        main_splitter.addWidget(right_panel)
 
-        splitter.addWidget(right_panel)
+        # Set splitter sizes (20% list, 80% content)
+        main_splitter.setSizes([200, 800])
 
-        # Set splitter sizes (30% list, 70% content)
-        splitter.setSizes([300, 700])
+        layout.addWidget(main_splitter)
 
-        layout.addWidget(splitter)
+        # Store parsed data
+        self._filing_causes = []
+        self._filing_sections = []
 
         # Load filings on creation
         self._refresh_filings_list()
@@ -2264,21 +2386,228 @@ class MainWindow(QMainWindow):
             self._on_filing_selected(self.filings_list.item(0))
 
     def _on_filing_selected(self, item):
-        """Handle filing selection - load the text content."""
+        """Handle filing selection - load and parse all content."""
+        import re
         if not item:
             return
 
         pdf_path = Path(item.data(Qt.ItemDataRole.UserRole))
         txt_path = pdf_path.with_suffix('.txt')
 
-        if txt_path.exists():
-            try:
-                content = txt_path.read_text(encoding='utf-8')
-                self.filing_content.setPlainText(content)
-            except Exception as e:
-                self.filing_content.setPlainText(f"Error reading file: {str(e)}")
-        else:
+        if not txt_path.exists():
             self.filing_content.setPlainText("Text file not found. Please extract text from the PDF first.")
+            return
+
+        try:
+            content = txt_path.read_text(encoding='utf-8')
+            self.filing_content.setPlainText(content)
+
+            # Parse case info
+            self._parse_filing_info(content)
+
+            # Parse causes of action
+            self._parse_causes_of_action(content)
+
+            # Parse sections
+            self._parse_sections(content)
+
+        except Exception as e:
+            self.filing_content.setPlainText(f"Error reading file: {str(e)}")
+
+    def _parse_filing_info(self, content: str):
+        """Parse and display case information."""
+        import re
+        lines = content.split('\n')
+
+        # Extract info
+        case_number = ""
+        court = ""
+        division = ""
+        plaintiffs = []
+        defendants = []
+        document_title = ""
+
+        # Parse header lines
+        for i, line in enumerate(lines[:50]):
+            line = line.strip()
+            if 'DISTRICT COURT' in line.upper():
+                court = line
+            if 'DIVISION' in line.upper() and 'NO.' in line.upper():
+                parts = line.split('NO.')
+                if len(parts) > 1:
+                    division = parts[0].strip()
+                    case_number = 'No. ' + parts[1].strip()
+            elif 'NO.' in line and 'cv' in line.lower():
+                case_number = line.strip()
+            if 'Plaintiffs' in line:
+                # Look back for plaintiff names
+                for j in range(max(0, i-3), i):
+                    pline = lines[j].strip()
+                    if pline and 'COURT' not in pline.upper() and 'DIVISION' not in pline.upper():
+                        if ' and ' in pline:
+                            plaintiffs.extend([p.strip().rstrip(',') for p in pline.split(' and ')])
+                        elif pline and pline not in plaintiffs:
+                            plaintiffs.append(pline.rstrip(','))
+            if 'Defendants' in line:
+                # Look back for defendant names
+                for j in range(max(0, i-5), i):
+                    dline = lines[j].strip()
+                    if dline and 'v.' not in dline and 'Plaintiffs' not in dline:
+                        # Split on semicolons
+                        for d in dline.split(';'):
+                            d = d.strip().rstrip(',')
+                            if d and d not in defendants and 'COURT' not in d.upper():
+                                defendants.append(d)
+            if 'COMPLAINT' in line.upper() or 'MOTION' in line.upper() or 'AMENDED' in line.upper():
+                if not document_title:
+                    document_title = line
+
+        # Build HTML info display
+        html = f"""
+        <div style="font-family: 'Helvetica Neue', Arial, sans-serif;">
+            <h2 style="color: #1565C0; border-bottom: 2px solid #1565C0; padding-bottom: 10px;">
+                {case_number or 'Case Information'}
+            </h2>
+
+            <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+                <tr>
+                    <td style="padding: 8px; font-weight: bold; width: 150px; vertical-align: top;">Court:</td>
+                    <td style="padding: 8px;">{court}</td>
+                </tr>
+                <tr style="background-color: #f5f5f5;">
+                    <td style="padding: 8px; font-weight: bold; vertical-align: top;">Division:</td>
+                    <td style="padding: 8px;">{division}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; font-weight: bold; vertical-align: top;">Case Number:</td>
+                    <td style="padding: 8px; font-size: 14px; color: #1565C0;"><b>{case_number}</b></td>
+                </tr>
+                <tr style="background-color: #f5f5f5;">
+                    <td style="padding: 8px; font-weight: bold; vertical-align: top;">Document:</td>
+                    <td style="padding: 8px;">{document_title}</td>
+                </tr>
+            </table>
+
+            <h3 style="color: #2E7D32; margin-top: 25px; border-bottom: 1px solid #2E7D32; padding-bottom: 5px;">
+                Plaintiffs ({len(plaintiffs)})
+            </h3>
+            <ul style="margin: 10px 0; padding-left: 25px;">
+        """
+        for p in plaintiffs:
+            if p:
+                html += f"<li style='padding: 5px 0;'>{p}</li>"
+        html += "</ul>"
+
+        html += f"""
+            <h3 style="color: #C62828; margin-top: 25px; border-bottom: 1px solid #C62828; padding-bottom: 5px;">
+                Defendants ({len(defendants)})
+            </h3>
+            <ul style="margin: 10px 0; padding-left: 25px;">
+        """
+        for d in defendants:
+            if d:
+                html += f"<li style='padding: 5px 0;'>{d}</li>"
+        html += "</ul></div>"
+
+        self.filing_info_text.setHtml(html)
+
+    def _parse_causes_of_action(self, content: str):
+        """Parse causes of action from filing."""
+        import re
+        self.causes_list.clear()
+        self._filing_causes = []
+
+        # Find all COUNT lines
+        pattern = r'(COUNT\s+[IVX]+\s*[-–—]\s*.+?)(?=COUNT\s+[IVX]+|VI\.\s+PRAYER|$)'
+        matches = list(re.finditer(pattern, content, re.DOTALL | re.IGNORECASE))
+
+        for match in matches:
+            full_text = match.group(1).strip()
+            # Get title (first line or two)
+            lines = full_text.split('\n')
+            title_parts = []
+            for line in lines[:3]:
+                line = line.strip()
+                if line and not line.isdigit():
+                    title_parts.append(line)
+                    if len(title_parts) >= 2:
+                        break
+
+            title = ' '.join(title_parts)
+            # Clean up title
+            title = re.sub(r'\s+', ' ', title)
+            if len(title) > 80:
+                title = title[:77] + '...'
+
+            item = QListWidgetItem(title)
+            item.setData(Qt.ItemDataRole.UserRole, full_text)
+            self.causes_list.addItem(item)
+            self._filing_causes.append({'title': title, 'text': full_text})
+
+        # Select first if available
+        if self.causes_list.count() > 0:
+            self.causes_list.setCurrentRow(0)
+            self._on_cause_selected(self.causes_list.item(0))
+
+    def _on_cause_selected(self, item):
+        """Display selected cause of action."""
+        if not item:
+            return
+        text = item.data(Qt.ItemDataRole.UserRole)
+        self.cause_detail.setPlainText(text)
+
+    def _parse_sections(self, content: str):
+        """Parse major sections from filing."""
+        import re
+        self.sections_list.clear()
+        self._filing_sections = []
+
+        # Find Roman numeral sections
+        pattern = r'^([IVX]+\.\s+[A-Z][A-Z\s]+)$'
+        lines = content.split('\n')
+
+        current_section = None
+        current_text = []
+
+        for line in lines:
+            line_stripped = line.strip()
+            match = re.match(pattern, line_stripped)
+            if match:
+                # Save previous section
+                if current_section:
+                    self._filing_sections.append({
+                        'title': current_section,
+                        'text': '\n'.join(current_text)
+                    })
+                current_section = match.group(1)
+                current_text = [line]
+            elif current_section:
+                current_text.append(line)
+
+        # Save last section
+        if current_section:
+            self._filing_sections.append({
+                'title': current_section,
+                'text': '\n'.join(current_text)
+            })
+
+        # Populate list
+        for section in self._filing_sections:
+            item = QListWidgetItem(section['title'])
+            item.setData(Qt.ItemDataRole.UserRole, section['text'])
+            self.sections_list.addItem(item)
+
+        # Select first if available
+        if self.sections_list.count() > 0:
+            self.sections_list.setCurrentRow(0)
+            self._on_section_selected(self.sections_list.item(0))
+
+    def _on_section_selected(self, item):
+        """Display selected section."""
+        if not item:
+            return
+        text = item.data(Qt.ItemDataRole.UserRole)
+        self.section_detail.setPlainText(text)
 
     def _open_selected_filing_pdf(self):
         """Open the selected filing's PDF in the default viewer."""
