@@ -65,6 +65,42 @@ from .auditor import (
 )
 
 
+def format_case_name(name: str) -> str:
+    """Format case name with proper title case for legal citations.
+
+    Handles: "smith v. jones" -> "Smith v. Jones"
+    Preserves: U.S., FBI, Inc., LLC, etc.
+    """
+    if not name:
+        return name
+
+    # Words to keep lowercase (unless first)
+    lowercase_words = {'v', 'v.', 'of', 'the', 'in', 'at', 'by', 'for', 'on', 'and', 'or', 'a', 'an', 'to'}
+    # Abbreviations to keep uppercase
+    uppercase_abbrevs = {'U.S.', 'US', 'USA', 'FBI', 'CIA', 'IRS', 'DOJ', 'SEC', 'FTC', 'LLC', 'LLP', 'INC', 'CORP'}
+
+    words = name.split()
+    result = []
+
+    for i, word in enumerate(words):
+        word_upper = word.upper().rstrip('.,')
+
+        # Keep uppercase abbreviations
+        if word_upper in uppercase_abbrevs or word.upper() in uppercase_abbrevs:
+            if word_upper == 'US':
+                result.append('U.S.')
+            else:
+                result.append(word.upper() if word_upper in uppercase_abbrevs else word)
+        # Keep lowercase words (except first word)
+        elif word.lower() in lowercase_words and i > 0:
+            result.append(word.lower())
+        # Title case everything else
+        else:
+            result.append(word.capitalize())
+
+    return ' '.join(result)
+
+
 class SectionTagHighlighter(QSyntaxHighlighter):
     """Syntax highlighter for section and subsection tags in the editor.
 
@@ -1009,9 +1045,16 @@ class MainWindow(QMainWindow):
             start = match.start()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
 
-            # Skip if this is in the table of contents (before line 800)
-            if match.start() < 25000:  # Approximate position after TOC
+            # Skip if this is in the table of contents (actual rules start ~44000)
+            if match.start() < 44000:
                 continue
+
+            # Skip TOC entries (they have dots like "........")
+            if '....' in title or title.endswith('.'):
+                continue
+
+            # Clean title - remove any trailing dots/page numbers
+            title = re.sub(r'\s*\.+\s*\d*$', '', title).strip()
 
             # Skip duplicates
             if rule_num in seen_rules:
@@ -1178,8 +1221,8 @@ class MainWindow(QMainWindow):
         # Update table
         self.library_table.setRowCount(len(cases))
         for row, case in enumerate(cases):
-            # Store case ID in first column
-            name_item = QTableWidgetItem(case.case_name)
+            # Store case ID in first column - format case name with proper title case
+            name_item = QTableWidgetItem(format_case_name(case.case_name))
             name_item.setData(Qt.ItemDataRole.UserRole, case.id)
             self.library_table.setItem(row, 0, name_item)
 
