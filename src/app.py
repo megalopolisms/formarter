@@ -1462,14 +1462,17 @@ class MainWindow(QMainWindow):
             description = checklist_item.description if checklist_item else f"Item {item_id}"
             severity = checklist_item.fail_severity if checklist_item else "normal"
             success_criteria = checklist_item.success_criteria if checklist_item else ""
+            fix_suggestion = checklist_item.fix_suggestion if checklist_item else ""
 
             # Mark critical items
             status_text = "CRITICAL" if severity == "critical" else "FAIL"
             tree_item = QTreeWidgetItem([str(item_id), description, status_text, item_result.message[:50]])
             tree_item.setData(0, Qt.ItemDataRole.UserRole, item_id)
             tooltip = item_result.message
+            if fix_suggestion:
+                tooltip += f"\n\n🔧 HOW TO FIX:\n{fix_suggestion}"
             if success_criteria:
-                tooltip += f"\n\nWhat success looks like:\n{success_criteria}"
+                tooltip += f"\n\n✓ What success looks like:\n{success_criteria}"
             tree_item.setToolTip(1, tooltip)
 
             if severity == "critical":
@@ -1486,9 +1489,13 @@ class MainWindow(QMainWindow):
         # Add WARNING items to fail list
         for item_id, item_result, checklist_item in sorted(warning_items, key=lambda x: x[0]):
             description = checklist_item.description if checklist_item else f"Item {item_id}"
+            fix_suggestion = checklist_item.fix_suggestion if checklist_item else ""
             tree_item = QTreeWidgetItem([str(item_id), description, "WARN", item_result.message[:50]])
             tree_item.setData(0, Qt.ItemDataRole.UserRole, item_id)
-            tree_item.setToolTip(1, item_result.message)
+            tooltip = item_result.message
+            if fix_suggestion:
+                tooltip += f"\n\n🔧 HOW TO FIX:\n{fix_suggestion}"
+            tree_item.setToolTip(1, tooltip)
             for col in range(4):
                 tree_item.setBackground(col, QColor("#fff9c4"))  # Light yellow
                 tree_item.setForeground(col, QColor("#f57f17"))  # Orange

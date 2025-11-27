@@ -55,6 +55,7 @@ class ChecklistItem:
     redundancy_patterns: Optional[List[str]] = None  # Alternative patterns to verify (backup checks)
     fail_severity: str = "normal"  # "critical", "normal", "minor" - how serious is a failure
     rule_explanation: str = ""  # Plain English explanation of the rule
+    fix_suggestion: str = ""  # Specific language or steps to fix a failure
 
 
 # =============================================================================
@@ -76,7 +77,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Document header contains 'UNITED STATES DISTRICT COURT' followed by district name (e.g., 'FOR THE SOUTHERN DISTRICT OF MISSISSIPPI'). Must be in ALL CAPS, typically centered at top of first page.",
         redundancy_patterns=["U.S. DISTRICT COURT", "DISTRICT COURT", "IN THE UNITED STATES"],
         fail_severity="critical",
-        rule_explanation="Per L.U.Civ.R. 10(a), all documents must contain proper court identification in the caption."
+        rule_explanation="Per L.U.Civ.R. 10(a), all documents must contain proper court identification in the caption.",
+        fix_suggestion="Select a Case Profile from the dropdown. The app will auto-generate the caption with: UNITED STATES DISTRICT COURT FOR THE SOUTHERN DISTRICT OF MISSISSIPPI"
     ),
     ChecklistItem(
         id=2,
@@ -89,7 +91,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Caption contains plaintiff's full legal name followed by 'Plaintiff' or 'Plaintiffs' designation. Example: 'JOHN DOE, Plaintiff' or 'JOHN DOE and JANE DOE, Plaintiffs'. Pro se plaintiffs should see their name clearly listed.",
         redundancy_patterns=["Plaintiff,", "Plaintiffs,", ", Plaintiff", "PRO SE PLAINTIFF"],
         fail_severity="critical",
-        rule_explanation="Fed. R. Civ. P. 10(a) requires caption to name all parties; plaintiff identification is mandatory."
+        rule_explanation="Fed. R. Civ. P. 10(a) requires caption to name all parties; plaintiff identification is mandatory.",
+        fix_suggestion="Select a Case Profile from the dropdown. The caption will include plaintiff designation automatically."
     ),
     ChecklistItem(
         id=3,
@@ -102,7 +105,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Caption contains defendant's name(s) followed by 'Defendant' or 'Defendants' designation. Example: 'CITY OF BILOXI, Defendant'. Government entities should be named with full official name.",
         redundancy_patterns=["Defendant.", "Defendants.", ", Defendant", "et al., Defendants"],
         fail_severity="critical",
-        rule_explanation="Fed. R. Civ. P. 10(a) requires all parties to be named in the caption."
+        rule_explanation="Fed. R. Civ. P. 10(a) requires all parties to be named in the caption.",
+        fix_suggestion="Select a Case Profile from the dropdown. The caption will include defendant designation automatically."
     ),
     ChecklistItem(
         id=4,
@@ -115,7 +119,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Case number follows federal format: 'X:XX-cv-XXXXX' where X is division number, XX is year, and XXXXX is case number. Examples: '3:24-cv-00178', '1:23-cv-00042'. Must appear in caption area.",
         redundancy_patterns=[r"Civil Action No\.", r"Case No\.", r"No\. \d+", r"\d{1,2}:\d{2}-cv"],
         fail_severity="critical",
-        rule_explanation="Case number identifies the matter; incorrect format may cause filing rejection."
+        rule_explanation="Case number identifies the matter; incorrect format may cause filing rejection.",
+        fix_suggestion="Select a Case Profile from the dropdown. The case number (e.g., 3:24-cv-00178) will be auto-generated in the caption."
     ),
     ChecklistItem(
         id=5,
@@ -128,7 +133,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Document title clearly states 'MOTION FOR TEMPORARY RESTRAINING ORDER' or equivalent (e.g., 'MOTION FOR TRO', 'EMERGENCY MOTION FOR TEMPORARY RESTRAINING ORDER'). Title appears after caption, typically centered and in bold/caps.",
         redundancy_patterns=["MOTION FOR.*RESTRAINING", "TRO MOTION", "APPLICATION FOR.*RESTRAINING ORDER"],
         fail_severity="critical",
-        rule_explanation="Fed. R. Civ. P. 7(b)(1) requires motions to state their purpose; unclear titles may delay processing."
+        rule_explanation="Fed. R. Civ. P. 7(b)(1) requires motions to state their purpose; unclear titles may delay processing.",
+        fix_suggestion="Set the 'Document Title' field to: MOTION FOR TEMPORARY RESTRAINING ORDER PURSUANT TO FED. R. CIV. P. 65"
     ),
     ChecklistItem(
         id=6,
@@ -141,7 +147,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Document title or subtitle references Rule 65, the federal rule governing TROs. Examples: 'MOTION...PURSUANT TO FED. R. CIV. P. 65', 'MOTION...UNDER RULE 65'. Should appear in title line.",
         redundancy_patterns=["FRCP 65", "Rule 65(b)", "Fed.R.Civ.P. 65", "pursuant to Rule 65"],
         fail_severity="normal",
-        rule_explanation="Citing the governing rule helps the court immediately identify the type of relief sought."
+        rule_explanation="Citing the governing rule helps the court immediately identify the type of relief sought.",
+        fix_suggestion="Add 'PURSUANT TO FED. R. CIV. P. 65' to your document title. Example: MOTION FOR TEMPORARY RESTRAINING ORDER PURSUANT TO FED. R. CIV. P. 65"
     ),
     ChecklistItem(
         id=7,
@@ -154,7 +161,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="If seeking TRO without advance notice to opposing party, title MUST include 'EX PARTE'. Example: 'EX PARTE MOTION FOR TEMPORARY RESTRAINING ORDER'. Not required if notice was given.",
         redundancy_patterns=["WITHOUT NOTICE", "WITHOUT PRIOR NOTICE", "EX-PARTE"],
         fail_severity="normal",
-        rule_explanation="Fed. R. Civ. P. 65(b) allows TRO without notice only in specific circumstances; 'ex parte' designation alerts court."
+        rule_explanation="Fed. R. Civ. P. 65(b) allows TRO without notice only in specific circumstances; 'ex parte' designation alerts court.",
+        fix_suggestion="Add 'EX PARTE' to your title: EX PARTE MOTION FOR TEMPORARY RESTRAINING ORDER. Only use if filing without giving notice to defendants."
     ),
     ChecklistItem(
         id=8,
@@ -167,7 +175,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="If expedited review is needed, title should include 'URGENT' or 'URGENT AND NECESSITOUS'. This alerts the clerk to prioritize the filing. Example: 'URGENT MOTION FOR TEMPORARY RESTRAINING ORDER'.",
         redundancy_patterns=["TIME-SENSITIVE", "EXPEDITED", "IMMEDIATE"],
         fail_severity="minor",
-        rule_explanation="L.U.Civ.R. 7(b)(5) requires 'urgent and necessitous' designation for matters requiring immediate attention."
+        rule_explanation="L.U.Civ.R. 7(b)(5) requires 'urgent and necessitous' designation for matters requiring immediate attention.",
+        fix_suggestion="Add 'URGENT AND NECESSITOUS' to your title: URGENT AND NECESSITOUS MOTION FOR TEMPORARY RESTRAINING ORDER"
     ),
     ChecklistItem(
         id=9,
@@ -180,7 +189,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="For true emergencies requiring same-day or immediate attention, title should include 'EMERGENCY'. Example: 'EMERGENCY MOTION FOR TEMPORARY RESTRAINING ORDER'. Use only for genuine emergencies.",
         redundancy_patterns=["EMERGENT", "IMMEDIATE RELIEF"],
         fail_severity="minor",
-        rule_explanation="'Emergency' designation triggers expedited processing; misuse may result in sanctions."
+        rule_explanation="'Emergency' designation triggers expedited processing; misuse may result in sanctions.",
+        fix_suggestion="Add 'EMERGENCY' to your title: EMERGENCY MOTION FOR TEMPORARY RESTRAINING ORDER. Use only for true emergencies requiring same-day action."
     ),
 
     # =========================================================================
@@ -197,7 +207,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="First paragraph states who is filing the motion. Example: 'Plaintiff John Doe hereby moves this Court...' or 'Movant respectfully moves...'. Must clearly identify the party seeking relief.",
         redundancy_patterns=["Plaintiff moves", "Plaintiffs move", "respectfully moves", "comes now.*moves"],
         fail_severity="critical",
-        rule_explanation="Fed. R. Civ. P. 7(b)(1) requires motions to state the relief sought and grounds; identifying movant is fundamental."
+        rule_explanation="Fed. R. Civ. P. 7(b)(1) requires motions to state the relief sought and grounds; identifying movant is fundamental.",
+        fix_suggestion="Add to your opening paragraph: 'Plaintiff [YOUR NAME], proceeding pro se, hereby moves this Court for a Temporary Restraining Order...'"
     ),
     ChecklistItem(
         id=11,
@@ -210,7 +221,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Document explicitly states plaintiff is proceeding 'pro se' (representing themselves without attorney). Example: 'Plaintiff, proceeding pro se, moves...' or 'Pro se Plaintiff respectfully requests...'",
         redundancy_patterns=["self-represented", "without counsel", "in pro per", "appearing pro se"],
         fail_severity="normal",
-        rule_explanation="Pro se status affects court procedures and gives notice that special accommodations may apply."
+        rule_explanation="Pro se status affects court procedures and gives notice that special accommodations may apply.",
+        fix_suggestion="Add 'proceeding pro se' after your name in the opening: 'Plaintiff [NAME], proceeding pro se, respectfully moves...'"
     ),
     ChecklistItem(
         id=12,
@@ -223,7 +235,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Motion body (not just title) references Rule 65 or Rule 65(b). Example: 'Pursuant to Federal Rule of Civil Procedure 65(b)...' or 'Under Rule 65, Plaintiff seeks...'. Rule must be cited in opening paragraphs.",
         redundancy_patterns=["Fed. R. Civ. P. 65", "FRCP 65", "Rule 65(b)(1)", "temporary restraining order under Rule"],
         fail_severity="critical",
-        rule_explanation="Rule 65(b) is the governing rule for TROs; citing it shows the motion is properly grounded in law."
+        rule_explanation="Rule 65(b) is the governing rule for TROs; citing it shows the motion is properly grounded in law.",
+        fix_suggestion="Add to your motion: 'Pursuant to Federal Rule of Civil Procedure 65(b), Plaintiff seeks a temporary restraining order...'"
     ),
     ChecklistItem(
         id=13,
@@ -256,7 +269,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Motion should NOT contain case citations like '123 F.3d 456' or '500 U.S. 100'. Case law belongs in the supporting brief/memorandum, not the motion itself. SUCCESS = no case citations found.",
         redundancy_patterns=[r"\d+\s+F\.Supp", r"\d+\s+F\.App", r"v\.\s+.*,\s+\d+\s+F\.", r"See\s+[A-Z][a-z]+\s+v\."],
         fail_severity="critical",
-        rule_explanation="L.U.Civ.R. 7(b)(2)(B) prohibits legal citations in motions; they must appear in briefs."
+        rule_explanation="L.U.Civ.R. 7(b)(2)(B) prohibits legal citations in motions; they must appear in briefs.",
+        fix_suggestion="REMOVE all case citations (e.g., '123 F.3d 456') from the motion. Move them to your SUPPORTING BRIEF/MEMORANDUM. The motion should contain only facts, not legal citations."
     ),
     ChecklistItem(
         id=16,
@@ -319,7 +333,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Motion MUST use the phrase 'irreparable harm', 'irreparable injury', or 'irreparable damage' AND describe specific non-monetary harm. Example: 'Plaintiff will suffer irreparable harm because the property will be destroyed...'",
         redundancy_patterns=["cannot be undone", "no adequate remedy at law", "monetary damages.*inadequate", "permanent.*harm"],
         fail_severity="critical",
-        rule_explanation="Rule 65(b)(1)(A) REQUIRES showing 'immediate and irreparable injury' - this is a mandatory element."
+        rule_explanation="Rule 65(b)(1)(A) REQUIRES showing 'immediate and irreparable injury' - this is a mandatory element.",
+        fix_suggestion="Add a paragraph stating: 'Plaintiff will suffer immediate and irreparable harm/injury because [describe specific harm that cannot be fixed with money]. Without this Court's intervention, [describe what will be permanently lost or damaged].'"
     ),
 
     # =========================================================================
@@ -336,7 +351,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Document contains a section titled 'CERTIFICATE OF NOTICE' or 'CERTIFICATE OF NOTICE EFFORTS' that describes attempts to notify opposing parties before filing. Required for ex parte TROs.",
         redundancy_patterns=["efforts to provide notice", "attempted to notify", "notice was given", "without notice because"],
         fail_severity="critical",
-        rule_explanation="Rule 65(b)(1)(B) REQUIRES certification describing 'efforts made to give notice and the reasons why it should not be required.'"
+        rule_explanation="Rule 65(b)(1)(B) REQUIRES certification describing 'efforts made to give notice and the reasons why it should not be required.'",
+        fix_suggestion="Add a section titled 'CERTIFICATE OF NOTICE EFFORTS' stating: 'I certify that on [DATE], I made the following efforts to notify Defendant(s) of this motion: [describe calls, emails, letters sent]. [State responses received or that no response was received].'"
     ),
     ChecklistItem(
         id=23,
@@ -393,7 +409,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Motion addresses the bond/security requirement. Must mention 'bond', 'security', or 'Rule 65(c)'. Can request waiver but MUST address it. Example: 'Plaintiff requests waiver of bond under Rule 65(c).'",
         redundancy_patterns=["security bond", "injunction bond", "Rule 65(c)", "waiver of bond", "nominal bond"],
         fail_severity="critical",
-        rule_explanation="Rule 65(c) requires security for TROs to protect defendant from wrongful restraint damages."
+        rule_explanation="Rule 65(c) requires security for TROs to protect defendant from wrongful restraint damages.",
+        fix_suggestion="Add: 'Pursuant to Fed. R. Civ. P. 65(c), Plaintiff requests that the Court waive the security bond requirement because Plaintiff is proceeding in forma pauperis / this is a civil rights action / Defendant is unlikely to suffer damages from the restraining order.'"
     ),
     ChecklistItem(
         id=28,
@@ -471,7 +488,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Motion requests TRO duration of 14 days or less. Example: 'TRO effective for 14 days' or 'until preliminary injunction hearing, not to exceed 14 days.' TROs cannot exceed 14 days without extension.",
         redundancy_patterns=["two weeks", "for a period not exceeding 14", "maximum duration", "until hearing"],
         fail_severity="normal",
-        rule_explanation="Rule 65(b)(2) limits TROs to 14 days (extendable once for good cause)."
+        rule_explanation="Rule 65(b)(2) limits TROs to 14 days (extendable once for good cause).",
+        fix_suggestion="Add to your relief section: 'Plaintiff requests the TRO remain in effect for fourteen (14) days or until the preliminary injunction hearing, whichever occurs first.'"
     ),
     ChecklistItem(
         id=35,
@@ -484,7 +502,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Motion requests expedited hearing on preliminary injunction. Example: 'Plaintiff requests the Court set hearing on preliminary injunction at the earliest available date.' TRO is temporary; PI hearing is required.",
         redundancy_patterns=["schedule.*hearing", "expedited hearing", "set for hearing", "preliminary injunction motion"],
         fail_severity="normal",
-        rule_explanation="Rule 65(b)(3) requires court to schedule PI hearing 'at the earliest possible time' after TRO."
+        rule_explanation="Rule 65(b)(3) requires court to schedule PI hearing 'at the earliest possible time' after TRO.",
+        fix_suggestion="Add: 'Plaintiff respectfully requests that the Court schedule a preliminary injunction hearing at the earliest available date.'"
     ),
 
     # =========================================================================
@@ -501,7 +520,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Document contains a DECLARATION or VERIFICATION section (or attachment). Look for 'DECLARATION OF [NAME]' or 'VERIFICATION' as section header. This sworn statement supports the factual allegations.",
         redundancy_patterns=["I declare under penalty", "AFFIDAVIT", "sworn statement", "I verify"],
         fail_severity="critical",
-        rule_explanation="Rule 65(b)(1)(A) requires 'specific facts in an affidavit or a verified complaint' - declaration fulfills this."
+        rule_explanation="Rule 65(b)(1)(A) requires 'specific facts in an affidavit or a verified complaint' - declaration fulfills this.",
+        fix_suggestion="Add a DECLARATION section: 'DECLARATION OF [YOUR NAME]' followed by 'I, [NAME], declare under penalty of perjury under the laws of the United States that the foregoing is true and correct based on my personal knowledge.'"
     ),
     ChecklistItem(
         id=37,
@@ -514,7 +534,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Declaration contains statutory language: 'under penalty of perjury' AND 'the foregoing is true and correct' (or substantially similar). This makes unsworn declaration equivalent to notarized affidavit.",
         redundancy_patterns=["subject to penalty", "perjury", "subscribed and sworn", "laws of the United States"],
         fail_severity="critical",
-        rule_explanation="28 U.S.C. § 1746 allows unsworn declarations to substitute for affidavits if proper language used."
+        rule_explanation="28 U.S.C. § 1746 allows unsworn declarations to substitute for affidavits if proper language used.",
+        fix_suggestion="Add to your declaration: 'I declare under penalty of perjury under the laws of the United States of America that the foregoing is true and correct.'"
     ),
     ChecklistItem(
         id=38,
@@ -527,7 +548,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Declaration contains 'true and correct' or 'true and accurate' statement. Standard language: 'I declare under penalty of perjury that the foregoing is true and correct.'",
         redundancy_patterns=["accurate to the best of my knowledge", "true to my knowledge", "truthful"],
         fail_severity="critical",
-        rule_explanation="The 'true and correct' certification is required by 28 U.S.C. § 1746 for valid declarations."
+        rule_explanation="The 'true and correct' certification is required by 28 U.S.C. § 1746 for valid declarations.",
+        fix_suggestion="Add to your declaration: '...that the foregoing is true and correct to the best of my knowledge.'"
     ),
     ChecklistItem(
         id=39,
@@ -540,7 +562,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Declaration states facts are based on 'personal knowledge'. Example: 'The following facts are based on my personal knowledge.' Hearsay must be identified as such.",
         redundancy_patterns=["I personally observed", "I have firsthand knowledge", "within my knowledge"],
         fail_severity="normal",
-        rule_explanation="Declarations must distinguish personal knowledge from information and belief."
+        rule_explanation="Declarations must distinguish personal knowledge from information and belief.",
+        fix_suggestion="Add to your declaration: 'The facts stated herein are based on my personal knowledge, and if called as a witness, I could and would testify competently thereto.'"
     ),
     ChecklistItem(
         id=40,
@@ -553,7 +576,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Declaration contains signature line with '/s/' electronic signature followed by declarant's name. Example: '/s/ John Doe'. Declaration must be signed by the person making it.",
         redundancy_patterns=["signed", "subscribed", "executed by"],
         fail_severity="critical",
-        rule_explanation="Unsigned declarations are invalid; 28 U.S.C. § 1746 requires signature."
+        rule_explanation="Unsigned declarations are invalid; 28 U.S.C. § 1746 requires signature.",
+        fix_suggestion="Select a Case Profile - the signature block will be auto-generated. Or add '/s/ [Your Full Name]' at the end of your declaration."
     ),
     ChecklistItem(
         id=41,
@@ -698,7 +722,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         check_method="check_page_count",
         success_criteria="Motion (not including brief, declaration, or exhibits) is 4 pages or fewer. Count only the motion itself. L.U.Civ.R. limits motion length; legal argument goes in brief.",
         fail_severity="critical",
-        rule_explanation="L.U.Civ.R. 7(b)(2)(A) limits motions to 4 pages; supporting brief is separate."
+        rule_explanation="L.U.Civ.R. 7(b)(2)(A) limits motions to 4 pages; supporting brief is separate.",
+        fix_suggestion="Your motion is too long. Move legal argument (case citations, legal analysis) to a separate SUPPORTING BRIEF/MEMORANDUM. Keep only facts in the motion. The motion should state WHAT you want and WHY (facts only)."
     ),
     ChecklistItem(
         id=55,
@@ -725,7 +750,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Document ends with signature block containing 'Respectfully submitted' (or similar) followed by signature line. Signature block appears after body text and before certificate of service.",
         redundancy_patterns=["Submitted by", "signed", "Pro Se Plaintiff"],
         fail_severity="critical",
-        rule_explanation="Rule 11(a) requires every pleading be signed; signature block is standard format."
+        rule_explanation="Rule 11(a) requires every pleading be signed; signature block is standard format.",
+        fix_suggestion="Select a Case Profile from the dropdown - signature block will be auto-generated. Or add: 'Respectfully submitted,' followed by '/s/ [Your Name]' and contact information."
     ),
     ChecklistItem(
         id=57,
@@ -738,7 +764,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Signature line contains '/s/' followed by full name. Example: '/s/ John Doe'. For paper filing, actual ink signature. Electronic signature format: /s/ First Last",
         redundancy_patterns=["electronically signed", "/s/.*[A-Z]", "digital signature"],
         fail_severity="critical",
-        rule_explanation="Rule 11(a) signature certifies document to court; unsigned filings may be stricken."
+        rule_explanation="Rule 11(a) signature certifies document to court; unsigned filings may be stricken.",
+        fix_suggestion="Select a Case Profile from the dropdown - electronic signature will be auto-generated. Or add: '/s/ [Your Full Legal Name]'"
     ),
     ChecklistItem(
         id=58,
@@ -782,7 +809,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Signature block includes phone number in format (XXX) XXX-XXXX or XXX-XXX-XXXX. Must be working number where party can be reached.",
         redundancy_patterns=["Phone:", "Tel:", "Telephone:", r"\d{10}"],
         fail_severity="normal",
-        rule_explanation="Phone number allows court and parties to contact filer for scheduling and urgent matters."
+        rule_explanation="Phone number allows court and parties to contact filer for scheduling and urgent matters.",
+        fix_suggestion="Select a Case Profile from the dropdown - phone number will be auto-generated. Or add your phone number in the signature block: '(305) 555-1234'"
     ),
     ChecklistItem(
         id=62,
@@ -795,7 +823,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Signature block includes valid email address. Example: 'yuri@megalopolisms.com'. Email enables electronic communication and service notifications.",
         redundancy_patterns=["Email:", "E-mail:", "@gmail", "@yahoo", "@outlook"],
         fail_severity="normal",
-        rule_explanation="Email address required for electronic service and court communications."
+        rule_explanation="Email address required for electronic service and court communications.",
+        fix_suggestion="Select a Case Profile from the dropdown - email will be auto-generated. Or add your email in the signature block: 'Email: your.email@example.com'"
     ),
     ChecklistItem(
         id=63,
@@ -808,7 +837,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Signature block identifies party as 'Pro Se Plaintiff' or 'Plaintiff, Pro Se'. This designation appears below name and indicates self-representation.",
         redundancy_patterns=["appearing pro se", "Pro Se Litigant", "Self-Represented"],
         fail_severity="normal",
-        rule_explanation="Pro se designation alerts court that party is unrepresented and may need accommodations."
+        rule_explanation="Pro se designation alerts court that party is unrepresented and may need accommodations.",
+        fix_suggestion="Select a Case Profile from the dropdown - Pro Se designation will be auto-generated. Or add 'Pro Se Plaintiff' below your signature."
     ),
     ChecklistItem(
         id=64,
@@ -835,7 +865,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Document contains 'CERTIFICATE OF SERVICE' section at end. This certifies how and when document was served on opposing parties. Required for all filed documents.",
         redundancy_patterns=["I hereby certify", "served.*following", "service was made"],
         fail_severity="critical",
-        rule_explanation="Rule 5(d)(1)(B) requires certificate of service to be filed with every document."
+        rule_explanation="Rule 5(d)(1)(B) requires certificate of service to be filed with every document.",
+        fix_suggestion="Select a Case Profile from the dropdown - Certificate of Service will be auto-generated with CM/ECF notification language."
     ),
     ChecklistItem(
         id=66,
@@ -898,7 +929,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Certificate states HOW service was made: 'by first-class mail', 'by email', 'by hand delivery', 'via CM/ECF'. Method must be listed for each party.",
         redundancy_patterns=["U.S. mail", "certified mail", "overnight", "in person", "electronic service"],
         fail_severity="normal",
-        rule_explanation="Different service methods have different effective dates; must be stated clearly."
+        rule_explanation="Different service methods have different effective dates; must be stated clearly.",
+        fix_suggestion="Select a Case Profile from the dropdown - CM/ECF service method will be auto-generated. Or add: 'I served this document via CM/ECF electronic notification' or 'by first-class mail to [addresses].'"
     ),
     ChecklistItem(
         id=72,
@@ -935,7 +967,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Document contains date line, typically near signature block. Example: 'Dated: November 26, 2025' or 'Dated this 26th day of November, 2025.' Date line shows when document was executed.",
         redundancy_patterns=["day of.*202", "this.*day of", r"\d{1,2}/\d{1,2}/\d{4}"],
         fail_severity="normal",
-        rule_explanation="Date establishes when party signed/certified the document."
+        rule_explanation="Date establishes when party signed/certified the document.",
+        fix_suggestion="Select a Case Profile from the dropdown - date line will be auto-generated. Or add: 'Dated: [Month Day, Year]' near your signature block."
     ),
     ChecklistItem(
         id=75,
@@ -992,7 +1025,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Motion includes PROPOSED ORDER as attachment. Look for 'PROPOSED ORDER' or '[PROPOSED] ORDER GRANTING TEMPORARY RESTRAINING ORDER'. Judge will modify and sign if granting.",
         redundancy_patterns=["ORDER GRANTING", "ORDER FOR", "IT IS HEREBY ORDERED", "the Court ORDERS"],
         fail_severity="normal",
-        rule_explanation="Many courts require proposed orders to expedite relief; saves judge drafting time."
+        rule_explanation="Many courts require proposed orders to expedite relief; saves judge drafting time.",
+        fix_suggestion="Create a separate PROPOSED ORDER document stating: 'ORDER GRANTING TEMPORARY RESTRAINING ORDER. IT IS HEREBY ORDERED that Defendant(s) are restrained from [specific actions]...' Include blank signature line for judge."
     ),
     ChecklistItem(
         id=80,
@@ -1005,7 +1039,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Each exhibit is labeled sequentially: 'Exhibit A', 'Exhibit B', etc. Labels should appear on exhibit cover sheets or at top of each exhibit. Referenced in motion body.",
         redundancy_patterns=["Attachment", "Ex.", "Exhibit 1", "Exhibit No."],
         fail_severity="normal",
-        rule_explanation="Proper labeling allows court and parties to reference specific exhibits."
+        rule_explanation="Proper labeling allows court and parties to reference specific exhibits.",
+        fix_suggestion="Label your exhibits as 'Exhibit A', 'Exhibit B', etc. Reference them in your motion: 'See Exhibit A (attached hereto).'"
     ),
     ChecklistItem(
         id=81,
@@ -1197,7 +1232,8 @@ TRO_CHECKLIST: List[ChecklistItem] = [
         success_criteria="Document title includes 'URGENT' for expedited matters. Example: 'URGENT MOTION FOR TEMPORARY RESTRAINING ORDER'. Alerts clerk to prioritize filing.",
         redundancy_patterns=["EXPEDITED", "EMERGENCY", "TIME-SENSITIVE", "NECESSITOUS"],
         fail_severity="minor",
-        rule_explanation="L.U.Civ.R. 7(b)(5) requires 'urgent and necessitous' designation for matters needing immediate attention."
+        rule_explanation="L.U.Civ.R. 7(b)(5) requires 'urgent and necessitous' designation for matters needing immediate attention.",
+        fix_suggestion="If this is urgent, add 'URGENT' to your document title: URGENT AND NECESSITOUS MOTION FOR TEMPORARY RESTRAINING ORDER"
     ),
     ChecklistItem(
         id=99,
