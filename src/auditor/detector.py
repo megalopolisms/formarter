@@ -27,6 +27,7 @@ class AuditOptions:
     is_urgent: bool = False    # Is this urgent/emergency?
     custom_title: str = ""     # Document title (caption check)
     case_number: str = ""      # Case number from case profile
+    has_case_profile: bool = False  # Is a case profile selected? (auto-adds signature block)
 
 
 class ComplianceDetector:
@@ -397,6 +398,10 @@ class ComplianceDetector:
 
     def check_declaration_signed(self) -> Tuple[CheckStatus, str, Optional[int]]:
         """Check item 40: Declaration signed."""
+        # Auto-pass if case profile is selected (signature auto-generated in PDF)
+        if self.options.has_case_profile:
+            return (CheckStatus.PASS, "Electronic signature auto-generated from case profile", None)
+
         found, line, _ = self._search_pattern(r"/s/\s*\w+")
         if found:
             return (CheckStatus.PASS, "Electronic signature found", line)
@@ -424,6 +429,10 @@ class ComplianceDetector:
 
     def check_signature_block(self) -> Tuple[CheckStatus, str, Optional[int]]:
         """Check item 56: Signature block at end."""
+        # Auto-pass if case profile is selected (signature block auto-generated in PDF)
+        if self.options.has_case_profile:
+            return (CheckStatus.PASS, "Signature block auto-generated from case profile", None)
+
         patterns = [
             r"Respectfully\s+submitted",
             r"/s/\s*\w+",
@@ -437,6 +446,10 @@ class ComplianceDetector:
 
     def check_electronic_signature(self) -> Tuple[CheckStatus, str, Optional[int]]:
         """Check item 57: Electronic signature present."""
+        # Auto-pass if case profile is selected (signature auto-generated in PDF)
+        if self.options.has_case_profile:
+            return (CheckStatus.PASS, "Electronic signature auto-generated from case profile", None)
+
         found, line, matched = self._search_pattern(r"/s/\s*[\w\s]+")
         if found:
             return (CheckStatus.PASS, f"Electronic signature found: {matched.strip()}", line)
@@ -444,6 +457,10 @@ class ComplianceDetector:
 
     def check_phone_number(self) -> Tuple[CheckStatus, str, Optional[int]]:
         """Check item 61: Phone number included."""
+        # Auto-pass if case profile is selected (phone auto-generated in PDF)
+        if self.options.has_case_profile:
+            return (CheckStatus.PASS, "Phone number auto-generated from case profile", None)
+
         patterns = [
             r"\(\d{3}\)\s*\d{3}[-.]?\d{4}",
             r"\d{3}[-.]?\d{3}[-.]?\d{4}"
@@ -456,6 +473,10 @@ class ComplianceDetector:
 
     def check_email_address(self) -> Tuple[CheckStatus, str, Optional[int]]:
         """Check item 62: Email address included."""
+        # Auto-pass if case profile is selected (email auto-generated in PDF)
+        if self.options.has_case_profile:
+            return (CheckStatus.PASS, "Email address auto-generated from case profile", None)
+
         found, line, matched = self._search_pattern(
             r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
         )
@@ -465,6 +486,10 @@ class ComplianceDetector:
 
     def check_pro_se_designation(self) -> Tuple[CheckStatus, str, Optional[int]]:
         """Check item 63: Pro Se Plaintiff designation."""
+        # Auto-pass if case profile is selected (Pro Se designation auto-generated in PDF)
+        if self.options.has_case_profile:
+            return (CheckStatus.PASS, "Pro Se Plaintiff designation auto-generated from case profile", None)
+
         found, line, _ = self._search_pattern(r"Pro\s*Se\s*Plaintiff")
         if found:
             return (CheckStatus.PASS, "Pro Se Plaintiff designation found", line)
@@ -476,6 +501,10 @@ class ComplianceDetector:
 
     def check_certificate_service(self) -> Tuple[CheckStatus, str, Optional[int]]:
         """Check item 65: Certificate of service included."""
+        # Auto-pass if case profile is selected (Certificate of Service auto-generated in PDF)
+        if self.options.has_case_profile:
+            return (CheckStatus.PASS, "Certificate of Service auto-generated from case profile", None)
+
         found, line, _ = self._search_pattern(r"CERTIFICATE\s+OF\s+SERVICE")
         if found:
             return (CheckStatus.PASS, "Certificate of service found", line)
@@ -483,6 +512,10 @@ class ComplianceDetector:
 
     def check_service_method(self) -> Tuple[CheckStatus, str, Optional[int]]:
         """Check item 71: Method of service stated."""
+        # Auto-pass if case profile is selected (Certificate of Service with CM/ECF auto-generated in PDF)
+        if self.options.has_case_profile:
+            return (CheckStatus.PASS, "Service method (CM/ECF) auto-generated from case profile", None)
+
         patterns = [
             r"(mail|email|electronic|hand.deliver|CM/ECF|certified\s+mail)",
             r"first.class\s+mail",
@@ -500,6 +533,10 @@ class ComplianceDetector:
 
     def check_date_line(self) -> Tuple[CheckStatus, str, Optional[int]]:
         """Check item 74: Date line present."""
+        # Auto-pass if case profile is selected (date line auto-generated in PDF)
+        if self.options.has_case_profile:
+            return (CheckStatus.PASS, "Date line auto-generated from case profile", None)
+
         patterns = [
             r"Dated:?\s*\w+\s+\d+",
             r"Date:?\s*\w+\s+\d+",

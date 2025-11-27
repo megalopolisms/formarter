@@ -1369,11 +1369,15 @@ class MainWindow(QMainWindow):
             case_number = case_profile.caption.case_number or ""
 
         # Build audit options from UI
+        # Check if a case profile is selected (signature block will be auto-generated)
+        has_case_profile = bool(doc.case_profile_index and doc.case_profile_index > 0)
+
         options = AuditOptions(
             is_ex_parte=self.audit_ex_parte_cb.isChecked(),
             is_urgent=self.audit_urgent_cb.isChecked(),
             custom_title=doc.custom_title or "",
-            case_number=case_number
+            case_number=case_number,
+            has_case_profile=has_case_profile
         )
 
         # Run the compliance detector with options
