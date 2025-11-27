@@ -516,7 +516,54 @@ class MainWindow(QMainWindow):
         return tab
 
     def _create_library_tab(self) -> QWidget:
-        """Create the Case Library tab for storing and organizing case law PDFs."""
+        """Create the Case Library tab with sub-tabs for Cases and Federal Rules."""
+        # Main container with sub-tabs
+        container = QWidget()
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create sub-tab widget
+        self.library_subtabs = QTabWidget()
+        self.library_subtabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #ddd;
+                background: white;
+            }
+            QTabBar::tab {
+                padding: 8px 20px;
+                margin-right: 2px;
+                background: #f0f0f0;
+                border: 1px solid #ddd;
+                border-bottom: none;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
+            }
+            QTabBar::tab:selected {
+                background: white;
+                border-bottom: 1px solid white;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #e0e0e0;
+            }
+        """)
+
+        # Sub-tab 1: Cases
+        cases_tab = self._create_cases_subtab()
+        self.library_subtabs.addTab(cases_tab, "Cases")
+
+        # Sub-tab 2: Civil Rules (Fed. R. Civ. P.)
+        civil_rules_tab = self._create_civil_rules_subtab()
+        self.library_subtabs.addTab(civil_rules_tab, "Civil Rules")
+
+        # Sub-tab 3: Criminal Rules (Fed. R. Crim. P.)
+        criminal_rules_tab = self._create_criminal_rules_subtab()
+        self.library_subtabs.addTab(criminal_rules_tab, "Criminal Rules")
+
+        main_layout.addWidget(self.library_subtabs)
+        return container
+
+    def _create_cases_subtab(self) -> QWidget:
+        """Create the Cases sub-tab for storing and organizing case law PDFs."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -717,6 +764,285 @@ class MainWindow(QMainWindow):
         self._refresh_library_table()
 
         return tab
+
+    def _create_civil_rules_subtab(self) -> QWidget:
+        """Create the Civil Rules sub-tab for Federal Rules of Civil Procedure."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Header
+        header = QLabel("Federal Rules of Civil Procedure")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        layout.addWidget(header)
+
+        description = QLabel(
+            "Browse and search the Federal Rules of Civil Procedure. "
+            "Select a rule to view its full text."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet("color: #666; margin-bottom: 10px;")
+        layout.addWidget(description)
+
+        # Search box
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Search:")
+        search_label.setStyleSheet("font-weight: bold;")
+        search_layout.addWidget(search_label)
+
+        self.civil_rules_search = QLineEdit()
+        self.civil_rules_search.setPlaceholderText("Search rules...")
+        self.civil_rules_search.textChanged.connect(self._on_civil_rules_search)
+        search_layout.addWidget(self.civil_rules_search)
+        search_layout.addStretch()
+        layout.addLayout(search_layout)
+
+        # Split view: rules list and rule content
+        from PyQt6.QtWidgets import QSplitter
+        splitter = QSplitter()
+
+        # Rules list
+        self.civil_rules_list = QListWidget()
+        self.civil_rules_list.setStyleSheet("""
+            QListWidget {
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #eee;
+            }
+            QListWidget::item:selected {
+                background: #4a90d9;
+                color: white;
+            }
+        """)
+        self.civil_rules_list.itemClicked.connect(self._on_civil_rule_selected)
+        splitter.addWidget(self.civil_rules_list)
+
+        # Rule content viewer
+        self.civil_rule_content = QTextEdit()
+        self.civil_rule_content.setReadOnly(True)
+        self.civil_rule_content.setStyleSheet("""
+            QTextEdit {
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                font-family: 'Times New Roman', serif;
+                font-size: 14px;
+                padding: 10px;
+            }
+        """)
+        splitter.addWidget(self.civil_rule_content)
+
+        splitter.setSizes([300, 500])
+        layout.addWidget(splitter)
+
+        # Load rules
+        self._load_civil_rules()
+
+        return tab
+
+    def _create_criminal_rules_subtab(self) -> QWidget:
+        """Create the Criminal Rules sub-tab for Federal Rules of Criminal Procedure."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Header
+        header = QLabel("Federal Rules of Criminal Procedure")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
+        layout.addWidget(header)
+
+        description = QLabel(
+            "Browse and search the Federal Rules of Criminal Procedure. "
+            "Select a rule to view its full text."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet("color: #666; margin-bottom: 10px;")
+        layout.addWidget(description)
+
+        # Search box
+        search_layout = QHBoxLayout()
+        search_label = QLabel("Search:")
+        search_label.setStyleSheet("font-weight: bold;")
+        search_layout.addWidget(search_label)
+
+        self.criminal_rules_search = QLineEdit()
+        self.criminal_rules_search.setPlaceholderText("Search rules...")
+        self.criminal_rules_search.textChanged.connect(self._on_criminal_rules_search)
+        search_layout.addWidget(self.criminal_rules_search)
+        search_layout.addStretch()
+        layout.addLayout(search_layout)
+
+        # Split view: rules list and rule content
+        from PyQt6.QtWidgets import QSplitter
+        splitter = QSplitter()
+
+        # Rules list
+        self.criminal_rules_list = QListWidget()
+        self.criminal_rules_list.setStyleSheet("""
+            QListWidget {
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #eee;
+            }
+            QListWidget::item:selected {
+                background: #4a90d9;
+                color: white;
+            }
+        """)
+        self.criminal_rules_list.itemClicked.connect(self._on_criminal_rule_selected)
+        splitter.addWidget(self.criminal_rules_list)
+
+        # Rule content viewer
+        self.criminal_rule_content = QTextEdit()
+        self.criminal_rule_content.setReadOnly(True)
+        self.criminal_rule_content.setStyleSheet("""
+            QTextEdit {
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                font-family: 'Times New Roman', serif;
+                font-size: 14px;
+                padding: 10px;
+            }
+        """)
+        splitter.addWidget(self.criminal_rule_content)
+
+        splitter.setSizes([300, 500])
+        layout.addWidget(splitter)
+
+        # Load rules
+        self._load_criminal_rules()
+
+        return tab
+
+    def _load_civil_rules(self):
+        """Load and parse Federal Rules of Civil Procedure."""
+        import re
+        from pathlib import Path
+
+        txt_path = Path.home() / "Dropbox/Formarter Folder/case_library/Federal Rules of Civil Procedure.txt"
+        if not txt_path.exists():
+            self.civil_rules_list.addItem("Rules file not found")
+            return
+
+        text = txt_path.read_text(encoding='utf-8')
+
+        # Parse rules - find "Rule X. Title" patterns
+        # Store rules as (rule_number, title, start_pos, end_pos)
+        self.civil_rules_data = []
+        rule_pattern = re.compile(r'^Rule (\d+(?:\.\d+)?)\.\s+(.+?)$', re.MULTILINE)
+
+        matches = list(rule_pattern.finditer(text))
+        for i, match in enumerate(matches):
+            rule_num = match.group(1)
+            title = match.group(2).strip()
+            start = match.start()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+
+            # Skip if this is in the table of contents (before line 800)
+            if match.start() < 25000:  # Approximate position after TOC
+                continue
+
+            rule_content = text[start:end].strip()
+            self.civil_rules_data.append({
+                'number': rule_num,
+                'title': title,
+                'content': rule_content
+            })
+
+        # Add to list widget
+        for rule in self.civil_rules_data:
+            item = QListWidgetItem(f"Rule {rule['number']}. {rule['title']}")
+            item.setData(256, rule)  # Store rule data
+            self.civil_rules_list.addItem(item)
+
+    def _load_criminal_rules(self):
+        """Load and parse Federal Rules of Criminal Procedure."""
+        import re
+        from pathlib import Path
+
+        txt_path = Path.home() / "Dropbox/Formarter Folder/case_library/Federal Rules of Criminal Procedure.txt"
+        if not txt_path.exists():
+            self.criminal_rules_list.addItem("Rules file not found")
+            return
+
+        text = txt_path.read_text(encoding='utf-8')
+
+        # Parse rules - find "Rule X. Title" patterns
+        self.criminal_rules_data = []
+        rule_pattern = re.compile(r'^Rule (\d+(?:\.\d+)?)\.\s+(.+?)$', re.MULTILINE)
+
+        matches = list(rule_pattern.finditer(text))
+        for i, match in enumerate(matches):
+            rule_num = match.group(1)
+            title = match.group(2).strip()
+            start = match.start()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+
+            # Skip if this is in the table of contents
+            if match.start() < 15000:  # Approximate position after TOC
+                continue
+
+            rule_content = text[start:end].strip()
+            self.criminal_rules_data.append({
+                'number': rule_num,
+                'title': title,
+                'content': rule_content
+            })
+
+        # Add to list widget
+        for rule in self.criminal_rules_data:
+            item = QListWidgetItem(f"Rule {rule['number']}. {rule['title']}")
+            item.setData(256, rule)  # Store rule data
+            self.criminal_rules_list.addItem(item)
+
+    def _on_civil_rule_selected(self, item):
+        """Handle selection of a civil rule."""
+        rule_data = item.data(256)
+        if rule_data:
+            self.civil_rule_content.setPlainText(rule_data['content'])
+
+    def _on_criminal_rule_selected(self, item):
+        """Handle selection of a criminal rule."""
+        rule_data = item.data(256)
+        if rule_data:
+            self.criminal_rule_content.setPlainText(rule_data['content'])
+
+    def _on_civil_rules_search(self, query):
+        """Filter civil rules by search query."""
+        query = query.lower().strip()
+        for i in range(self.civil_rules_list.count()):
+            item = self.civil_rules_list.item(i)
+            rule_data = item.data(256)
+            if rule_data:
+                visible = (query in item.text().lower() or
+                          query in rule_data.get('content', '').lower())
+                item.setHidden(not visible)
+            else:
+                item.setHidden(bool(query))
+
+    def _on_criminal_rules_search(self, query):
+        """Filter criminal rules by search query."""
+        query = query.lower().strip()
+        for i in range(self.criminal_rules_list.count()):
+            item = self.criminal_rules_list.item(i)
+            rule_data = item.data(256)
+            if rule_data:
+                visible = (query in item.text().lower() or
+                          query in rule_data.get('content', '').lower())
+                item.setHidden(not visible)
+            else:
+                item.setHidden(bool(query))
 
     # ========== Library Tab Methods ==========
 
