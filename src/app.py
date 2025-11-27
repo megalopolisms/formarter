@@ -42,8 +42,9 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QApplication,
     QGridLayout,
+    QDateEdit,
 )
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QDate
 from PyQt6.QtGui import QFont, QTextCursor, QAction, QPixmap, QImage, QIcon, QSyntaxHighlighter, QTextCharFormat, QColor
 
 from .models import Document, Paragraph, Section, SpacingSettings, CaseCaption, SignatureBlock, CaseProfile
@@ -2450,13 +2451,13 @@ class MainWindow(QMainWindow):
         self._parse_case_info(widget, content, case_id)
 
         # Parse paragraphs
-        self._parse_paragraphs(widget, content)
+        self._parse_filing_paragraphs(widget, content)
 
         # Parse causes
         self._parse_case_causes(widget, content)
 
-    def _parse_paragraphs(self, widget, content: str):
-        """Parse numbered paragraphs from content."""
+    def _parse_filing_paragraphs(self, widget, content: str):
+        """Parse numbered paragraphs from filing content."""
         import re
         widget.para_list.clear()
         widget._paragraphs = []
