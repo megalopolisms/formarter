@@ -2708,41 +2708,42 @@ class MainWindow(QMainWindow):
             self.exhibit_detail_notes.setText("")
             self.exhibit_thumbnail.clear()
 
-    # ========== Dockets Tab ==========
+    # ========== Dockets Tab (Timeline View) ==========
 
     def _create_dockets_tab(self) -> QWidget:
-        """Create the Dockets tab for tracking case dockets and deadlines."""
+        """Create the Dockets tab as a timeline with court-style numbering and comments."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setSpacing(10)
 
         # Header
-        header = QLabel("Case Dockets")
+        header = QLabel("Case Docket Timeline")
         header.setStyleSheet("font-size: 18px; font-weight: bold; color: #333;")
         layout.addWidget(header)
 
         description = QLabel(
-            "Track court dockets, filing deadlines, and case events. "
-            "Import docket sheets from PACER or add entries manually."
+            "Court docket timeline with sequential numbering (like ECF). "
+            "Add entries and comments to track case progress."
         )
         description.setWordWrap(True)
-        description.setStyleSheet("color: #666; margin-bottom: 10px;")
+        description.setStyleSheet("color: #666; margin-bottom: 5px;")
         layout.addWidget(description)
 
         # Toolbar
         toolbar_layout = QHBoxLayout()
 
         # Add Entry button
-        add_entry_btn = QPushButton("+ Add Entry")
+        add_entry_btn = QPushButton("+ Add Docket Entry")
         add_entry_btn.setStyleSheet("""
             QPushButton {
                 background: #4a90d9;
                 color: white;
                 border: none;
-                padding: 8px 16px;
+                padding: 10px 20px;
                 border-radius: 5px;
                 font-weight: bold;
+                font-size: 13px;
             }
             QPushButton:hover {
                 background: #357abd;
@@ -2758,7 +2759,7 @@ class MainWindow(QMainWindow):
                 background: #6c757d;
                 color: white;
                 border: none;
-                padding: 8px 16px;
+                padding: 10px 20px;
                 border-radius: 5px;
             }
             QPushButton:hover {
@@ -2768,24 +2769,13 @@ class MainWindow(QMainWindow):
         import_btn.clicked.connect(self._on_import_pacer)
         toolbar_layout.addWidget(import_btn)
 
-        # Refresh button
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.setStyleSheet("""
-            QPushButton {
-                background: #28a745;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background: #218838;
-            }
-        """)
-        refresh_btn.clicked.connect(self._refresh_dockets)
-        toolbar_layout.addWidget(refresh_btn)
-
         toolbar_layout.addStretch()
+
+        # Entry count label
+        self.docket_count_label = QLabel("")
+        self.docket_count_label.setStyleSheet("color: #666; font-size: 12px;")
+        toolbar_layout.addWidget(self.docket_count_label)
+
         layout.addLayout(toolbar_layout)
 
         # Filter row
@@ -2796,9 +2786,8 @@ class MainWindow(QMainWindow):
         filter_layout.addWidget(case_label)
 
         self.docket_case_filter = QComboBox()
-        self.docket_case_filter.addItem("All Cases", "")
         self.docket_case_filter.addItem("Case 178 (Petrini v. City of Biloxi)", "178")
-        self.docket_case_filter.setMinimumWidth(250)
+        self.docket_case_filter.setMinimumWidth(280)
         self.docket_case_filter.currentIndexChanged.connect(self._on_docket_filter_changed)
         filter_layout.addWidget(self.docket_case_filter)
 
@@ -2807,49 +2796,130 @@ class MainWindow(QMainWindow):
         filter_layout.addWidget(search_label)
 
         self.docket_search_edit = QLineEdit()
-        self.docket_search_edit.setPlaceholderText("Search docket entries...")
+        self.docket_search_edit.setPlaceholderText("Search docket text...")
         self.docket_search_edit.textChanged.connect(self._on_docket_search_changed)
-        self.docket_search_edit.setMaximumWidth(300)
+        self.docket_search_edit.setMaximumWidth(250)
         filter_layout.addWidget(self.docket_search_edit)
 
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
-        # Main content - docket table
-        self.docket_table = QTableWidget()
-        self.docket_table.setColumnCount(5)
-        self.docket_table.setHorizontalHeaderLabels(["#", "Date", "Description", "Document", "Filed By"])
-        self.docket_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.docket_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.docket_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.docket_table.horizontalHeader().setStretchLastSection(True)
-        self.docket_table.setColumnWidth(0, 50)   # #
-        self.docket_table.setColumnWidth(1, 100)  # Date
-        self.docket_table.setColumnWidth(2, 400)  # Description
-        self.docket_table.setColumnWidth(3, 100)  # Document
-        self.docket_table.setColumnWidth(4, 150)  # Filed By
-        self.docket_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.docket_table.customContextMenuRequested.connect(self._on_docket_context_menu)
-        self.docket_table.itemDoubleClicked.connect(self._on_docket_double_click)
-        layout.addWidget(self.docket_table)
+        # Main content area with splitter
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Upcoming deadlines section
-        deadlines_header = QLabel("Upcoming Deadlines")
-        deadlines_header.setStyleSheet("font-size: 14px; font-weight: bold; margin-top: 10px;")
-        layout.addWidget(deadlines_header)
+        # Left side - Timeline scroll area
+        timeline_container = QWidget()
+        timeline_layout = QVBoxLayout(timeline_container)
+        timeline_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.deadlines_list = QListWidget()
-        self.deadlines_list.setMaximumHeight(150)
-        self.deadlines_list.setStyleSheet("""
-            QListWidget::item {
-                padding: 8px;
-                border-bottom: 1px solid #eee;
-            }
-            QListWidget::item:selected {
-                background: #e3f2fd;
+        timeline_header = QLabel("Timeline")
+        timeline_header.setStyleSheet("font-size: 14px; font-weight: bold; color: #333; padding: 5px;")
+        timeline_layout.addWidget(timeline_header)
+
+        # Scrollable timeline
+        self.timeline_scroll = QScrollArea()
+        self.timeline_scroll.setWidgetResizable(True)
+        self.timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.timeline_scroll.setStyleSheet("""
+            QScrollArea {
+                border: 1px solid #ddd;
+                background: #fafafa;
             }
         """)
-        layout.addWidget(self.deadlines_list)
+
+        self.timeline_widget = QWidget()
+        self.timeline_layout = QVBoxLayout(self.timeline_widget)
+        self.timeline_layout.setContentsMargins(10, 10, 10, 10)
+        self.timeline_layout.setSpacing(0)
+        self.timeline_layout.addStretch()
+
+        self.timeline_scroll.setWidget(self.timeline_widget)
+        timeline_layout.addWidget(self.timeline_scroll)
+
+        main_splitter.addWidget(timeline_container)
+
+        # Right side - Entry details and comments
+        detail_container = QWidget()
+        detail_layout = QVBoxLayout(detail_container)
+        detail_layout.setContentsMargins(10, 0, 0, 0)
+
+        detail_header = QLabel("Entry Details")
+        detail_header.setStyleSheet("font-size: 14px; font-weight: bold; color: #333; padding: 5px;")
+        detail_layout.addWidget(detail_header)
+
+        # Detail display area
+        self.docket_detail_frame = QFrame()
+        self.docket_detail_frame.setStyleSheet("""
+            QFrame {
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+            }
+        """)
+        detail_frame_layout = QVBoxLayout(self.docket_detail_frame)
+
+        # Docket number display
+        self.docket_detail_number = QLabel("")
+        self.docket_detail_number.setStyleSheet("font-size: 24px; font-weight: bold; color: #4a90d9;")
+        detail_frame_layout.addWidget(self.docket_detail_number)
+
+        # Date display
+        self.docket_detail_date = QLabel("")
+        self.docket_detail_date.setStyleSheet("font-size: 12px; color: #666;")
+        detail_frame_layout.addWidget(self.docket_detail_date)
+
+        # Text/Description display
+        self.docket_detail_text = QLabel("")
+        self.docket_detail_text.setWordWrap(True)
+        self.docket_detail_text.setStyleSheet("font-size: 13px; color: #333; margin-top: 10px;")
+        detail_frame_layout.addWidget(self.docket_detail_text)
+
+        # Filed by
+        self.docket_detail_filed = QLabel("")
+        self.docket_detail_filed.setStyleSheet("font-size: 11px; color: #888; margin-top: 5px;")
+        detail_frame_layout.addWidget(self.docket_detail_filed)
+
+        detail_frame_layout.addStretch()
+        detail_layout.addWidget(self.docket_detail_frame)
+
+        # Comments section
+        comments_header = QLabel("Comments / Notes")
+        comments_header.setStyleSheet("font-size: 13px; font-weight: bold; color: #333; margin-top: 15px;")
+        detail_layout.addWidget(comments_header)
+
+        self.docket_comments_edit = QTextEdit()
+        self.docket_comments_edit.setPlaceholderText("Add your notes and comments about this docket entry...")
+        self.docket_comments_edit.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                padding: 8px;
+                font-size: 12px;
+            }
+        """)
+        self.docket_comments_edit.textChanged.connect(self._on_docket_comment_changed)
+        detail_layout.addWidget(self.docket_comments_edit)
+
+        # Action buttons
+        action_layout = QHBoxLayout()
+
+        edit_btn = QPushButton("Edit Entry")
+        edit_btn.clicked.connect(self._on_edit_docket_entry)
+        action_layout.addWidget(edit_btn)
+
+        delete_btn = QPushButton("Delete")
+        delete_btn.setStyleSheet("QPushButton { color: #dc3545; }")
+        delete_btn.clicked.connect(self._on_delete_docket_entry)
+        action_layout.addWidget(delete_btn)
+
+        action_layout.addStretch()
+        detail_layout.addLayout(action_layout)
+
+        main_splitter.addWidget(detail_container)
+
+        # Set splitter sizes
+        main_splitter.setSizes([500, 400])
+        layout.addWidget(main_splitter)
 
         # Initialize docket storage
         self._init_docket_storage()
@@ -2860,7 +2930,7 @@ class MainWindow(QMainWindow):
         return tab
 
     def _init_docket_storage(self):
-        """Initialize docket storage."""
+        """Initialize docket storage with timeline structure."""
         self.docket_storage_path = Path.home() / "Dropbox/Formarter Folder/dockets"
         self.docket_storage_path.mkdir(parents=True, exist_ok=True)
         self.docket_index_path = self.docket_storage_path / "index.json"
@@ -2870,11 +2940,16 @@ class MainWindow(QMainWindow):
                 import json
                 with open(self.docket_index_path, 'r') as f:
                     self._docket_data = json.load(f)
+                # Ensure new fields exist
+                if "next_number" not in self._docket_data:
+                    self._docket_data["next_number"] = {}
             except:
-                self._docket_data = {"cases": {}, "entries": [], "deadlines": []}
+                self._docket_data = {"cases": {}, "entries": [], "deadlines": [], "next_number": {}}
         else:
-            self._docket_data = {"cases": {}, "entries": [], "deadlines": []}
+            self._docket_data = {"cases": {}, "entries": [], "deadlines": [], "next_number": {"178": 1}}
             self._save_docket_data()
+
+        self._current_docket_entry_id = None
 
     def _save_docket_data(self):
         """Save docket data to disk."""
@@ -2882,10 +2957,29 @@ class MainWindow(QMainWindow):
         with open(self.docket_index_path, 'w') as f:
             json.dump(self._docket_data, f, indent=2, ensure_ascii=False)
 
+    def _get_next_docket_number(self, case_id: str) -> int:
+        """Get and increment the next docket number for a case."""
+        if case_id not in self._docket_data.get("next_number", {}):
+            # Find the highest existing number for this case
+            existing = [e.get('docket_number', 0) for e in self._docket_data.get('entries', [])
+                        if e.get('case_id') == case_id]
+            next_num = max(existing) + 1 if existing else 1
+            self._docket_data.setdefault("next_number", {})[case_id] = next_num
+
+        num = self._docket_data["next_number"][case_id]
+        self._docket_data["next_number"][case_id] = num + 1
+        return num
+
     def _refresh_dockets(self):
-        """Refresh the docket display."""
+        """Refresh the timeline display."""
+        # Clear existing timeline
+        while self.timeline_layout.count() > 1:
+            item = self.timeline_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
         # Get filter
-        case_filter = self.docket_case_filter.currentData() if hasattr(self, 'docket_case_filter') else ""
+        case_filter = self.docket_case_filter.currentData() if hasattr(self, 'docket_case_filter') else "178"
         search_query = self.docket_search_edit.text().lower() if hasattr(self, 'docket_search_edit') else ""
 
         # Filter entries
@@ -2893,94 +2987,190 @@ class MainWindow(QMainWindow):
         if case_filter:
             entries = [e for e in entries if e.get('case_id') == case_filter]
         if search_query:
-            entries = [e for e in entries if search_query in e.get('description', '').lower()]
+            entries = [e for e in entries if search_query in e.get('text', '').lower() or
+                       search_query in e.get('description', '').lower()]
 
-        # Sort by date descending
-        entries = sorted(entries, key=lambda x: x.get('date', ''), reverse=True)
+        # Sort by docket number ascending
+        entries = sorted(entries, key=lambda x: x.get('docket_number', 0))
 
-        # Update table
-        self.docket_table.setRowCount(len(entries))
+        # Update count
+        self.docket_count_label.setText(f"{len(entries)} entries")
+
+        # Create timeline entries
         for i, entry in enumerate(entries):
-            self.docket_table.setItem(i, 0, QTableWidgetItem(str(entry.get('entry_number', ''))))
-            self.docket_table.setItem(i, 1, QTableWidgetItem(entry.get('date', '')))
-            self.docket_table.setItem(i, 2, QTableWidgetItem(entry.get('description', '')))
-            self.docket_table.setItem(i, 3, QTableWidgetItem(entry.get('document', '')))
-            self.docket_table.setItem(i, 4, QTableWidgetItem(entry.get('filed_by', '')))
+            entry_widget = self._create_timeline_entry_widget(entry, is_last=(i == len(entries) - 1))
+            self.timeline_layout.insertWidget(i, entry_widget)
 
-            # Store entry ID
-            self.docket_table.item(i, 0).setData(Qt.ItemDataRole.UserRole, entry.get('id'))
+        # Clear detail view if no selection
+        if not entries:
+            self._clear_detail_view()
 
-        # Update deadlines
-        self._refresh_deadlines()
+    def _create_timeline_entry_widget(self, entry: dict, is_last: bool = False) -> QWidget:
+        """Create a timeline entry widget."""
+        widget = QFrame()
+        widget.setProperty("entry_id", entry.get('id'))
+        widget.setCursor(Qt.CursorShape.PointingHandCursor)
+        widget.mousePressEvent = lambda e, eid=entry.get('id'): self._on_timeline_entry_clicked(eid)
 
-    def _refresh_deadlines(self):
-        """Refresh the upcoming deadlines list."""
-        self.deadlines_list.clear()
-        deadlines = self._docket_data.get("deadlines", [])
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(10)
 
-        # Sort by date
-        from datetime import datetime
-        today = datetime.now().date()
-        upcoming = []
-        for d in deadlines:
-            try:
-                deadline_date = datetime.strptime(d.get('date', ''), '%Y-%m-%d').date()
-                if deadline_date >= today:
-                    days_until = (deadline_date - today).days
-                    upcoming.append((days_until, d))
-            except:
-                pass
+        # Left side - Number and timeline connector
+        left_widget = QWidget()
+        left_widget.setFixedWidth(60)
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
 
-        upcoming.sort(key=lambda x: x[0])
+        # Docket number circle
+        number_label = QLabel(str(entry.get('docket_number', '')))
+        number_label.setFixedSize(40, 40)
+        number_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        number_label.setStyleSheet("""
+            QLabel {
+                background: #4a90d9;
+                color: white;
+                border-radius: 20px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        left_layout.addWidget(number_label, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        for days_until, deadline in upcoming[:10]:
-            if days_until == 0:
-                prefix = "TODAY"
-                color = "#dc3545"
-            elif days_until == 1:
-                prefix = "TOMORROW"
-                color = "#fd7e14"
-            elif days_until <= 7:
-                prefix = f"In {days_until} days"
-                color = "#ffc107"
-            else:
-                prefix = f"In {days_until} days"
-                color = "#28a745"
+        # Timeline connector line
+        if not is_last:
+            line = QFrame()
+            line.setFixedWidth(2)
+            line.setMinimumHeight(30)
+            line.setStyleSheet("background: #4a90d9;")
+            left_layout.addWidget(line, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-            item = QListWidgetItem(f"[{prefix}] {deadline.get('description', '')} - {deadline.get('date', '')}")
-            item.setForeground(QColor(color))
-            item.setData(Qt.ItemDataRole.UserRole, deadline.get('id'))
-            self.deadlines_list.addItem(item)
+        left_layout.addStretch()
+        layout.addWidget(left_widget)
+
+        # Right side - Content
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(2)
+
+        # Date
+        date_label = QLabel(entry.get('date', ''))
+        date_label.setStyleSheet("font-size: 11px; color: #888;")
+        content_layout.addWidget(date_label)
+
+        # Text (truncated)
+        text = entry.get('text', entry.get('description', ''))
+        if len(text) > 100:
+            text = text[:100] + "..."
+        text_label = QLabel(text)
+        text_label.setWordWrap(True)
+        text_label.setStyleSheet("font-size: 12px; color: #333;")
+        content_layout.addWidget(text_label)
+
+        # Comment indicator
+        if entry.get('comments'):
+            comment_indicator = QLabel("💬 Has comments")
+            comment_indicator.setStyleSheet("font-size: 10px; color: #666;")
+            content_layout.addWidget(comment_indicator)
+
+        layout.addWidget(content_widget, stretch=1)
+
+        # Style the widget
+        widget.setStyleSheet("""
+            QFrame {
+                background: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 5px;
+                margin-bottom: 5px;
+            }
+            QFrame:hover {
+                background: #f5f5f5;
+                border-color: #4a90d9;
+            }
+        """)
+
+        return widget
+
+    def _on_timeline_entry_clicked(self, entry_id: str):
+        """Handle click on timeline entry."""
+        self._current_docket_entry_id = entry_id
+
+        # Find entry
+        entry = None
+        for e in self._docket_data.get('entries', []):
+            if e.get('id') == entry_id:
+                entry = e
+                break
+
+        if not entry:
+            return
+
+        # Update detail view
+        self.docket_detail_number.setText(f"Docket #{entry.get('docket_number', '')}")
+        self.docket_detail_date.setText(f"Filed: {entry.get('date', '')}")
+        self.docket_detail_text.setText(entry.get('text', entry.get('description', '')))
+        self.docket_detail_filed.setText(f"Filed by: {entry.get('filed_by', 'N/A')}")
+
+        # Load comments without triggering save
+        self.docket_comments_edit.blockSignals(True)
+        self.docket_comments_edit.setText(entry.get('comments', ''))
+        self.docket_comments_edit.blockSignals(False)
+
+    def _clear_detail_view(self):
+        """Clear the detail view."""
+        self.docket_detail_number.setText("")
+        self.docket_detail_date.setText("")
+        self.docket_detail_text.setText("")
+        self.docket_detail_filed.setText("")
+        self.docket_comments_edit.blockSignals(True)
+        self.docket_comments_edit.clear()
+        self.docket_comments_edit.blockSignals(False)
+        self._current_docket_entry_id = None
+
+    def _on_docket_comment_changed(self):
+        """Save comment when changed."""
+        if not self._current_docket_entry_id:
+            return
+
+        comment_text = self.docket_comments_edit.toPlainText()
+
+        # Update entry
+        for entry in self._docket_data.get('entries', []):
+            if entry.get('id') == self._current_docket_entry_id:
+                entry['comments'] = comment_text
+                break
+
+        self._save_docket_data()
 
     def _on_add_docket_entry(self):
-        """Add a new docket entry."""
-        dialog = AddDocketEntryDialog(self)
+        """Add a new docket entry with auto-numbering."""
+        case_id = self.docket_case_filter.currentData() if hasattr(self, 'docket_case_filter') else "178"
+
+        dialog = AddDocketEntryDialog(self, case_id, self._docket_data)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             import uuid
+
+            # Get next sequential number
+            docket_number = self._get_next_docket_number(case_id)
+
             entry = {
                 'id': str(uuid.uuid4()),
-                'case_id': dialog.case_id,
-                'entry_number': dialog.entry_number,
+                'case_id': case_id,
+                'docket_number': docket_number,
                 'date': dialog.date,
-                'description': dialog.description,
-                'document': dialog.document,
-                'filed_by': dialog.filed_by
+                'text': dialog.text,
+                'description': dialog.text,  # Keep for compatibility
+                'filed_by': dialog.filed_by,
+                'comments': ''
             }
             self._docket_data['entries'].append(entry)
-
-            # Add deadline if specified
-            if dialog.has_deadline:
-                deadline = {
-                    'id': str(uuid.uuid4()),
-                    'case_id': dialog.case_id,
-                    'date': dialog.deadline_date,
-                    'description': dialog.deadline_description,
-                    'entry_id': entry['id']
-                }
-                self._docket_data['deadlines'].append(deadline)
-
             self._save_docket_data()
             self._refresh_dockets()
+
+            # Select the new entry
+            self._on_timeline_entry_clicked(entry['id'])
 
     def _on_import_pacer(self):
         """Import docket from PACER HTML file."""
@@ -3000,92 +3190,59 @@ class MainWindow(QMainWindow):
 
     def _on_docket_filter_changed(self, index):
         """Handle docket filter change."""
+        self._clear_detail_view()
         self._refresh_dockets()
 
     def _on_docket_search_changed(self, text):
         """Handle docket search change."""
         self._refresh_dockets()
 
-    def _on_docket_context_menu(self, pos):
-        """Show context menu for docket entry."""
-        item = self.docket_table.itemAt(pos)
-        if not item:
+    def _on_edit_docket_entry(self):
+        """Edit the selected docket entry."""
+        if not self._current_docket_entry_id:
+            QMessageBox.information(self, "No Selection", "Please select a docket entry first.")
             return
 
-        menu = QMenu(self)
-
-        view_action = menu.addAction("View Details")
-        view_action.triggered.connect(self._on_view_docket_entry)
-
-        edit_action = menu.addAction("Edit")
-        edit_action.triggered.connect(self._on_edit_docket_entry)
-
-        menu.addSeparator()
-
-        add_deadline_action = menu.addAction("Add Deadline")
-        add_deadline_action.triggered.connect(self._on_add_deadline_from_entry)
-
-        menu.addSeparator()
-
-        delete_action = menu.addAction("Delete")
-        delete_action.triggered.connect(self._on_delete_docket_entry)
-
-        menu.exec(self.docket_table.mapToGlobal(pos))
-
-    def _on_docket_double_click(self, item):
-        """Handle double-click on docket entry."""
-        self._on_view_docket_entry()
-
-    def _on_view_docket_entry(self):
-        """View docket entry details."""
-        selected = self.docket_table.selectedItems()
-        if not selected:
-            return
-
-        row = selected[0].row()
-        entry_id = self.docket_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-
-        for entry in self._docket_data.get('entries', []):
-            if entry.get('id') == entry_id:
-                QMessageBox.information(
-                    self, "Docket Entry",
-                    f"Entry #{entry.get('entry_number', '')}\n"
-                    f"Date: {entry.get('date', '')}\n"
-                    f"Filed By: {entry.get('filed_by', '')}\n\n"
-                    f"Description:\n{entry.get('description', '')}\n\n"
-                    f"Document: {entry.get('document', '')}"
-                )
+        # Find entry
+        entry = None
+        for e in self._docket_data.get('entries', []):
+            if e.get('id') == self._current_docket_entry_id:
+                entry = e
                 break
 
-    def _on_edit_docket_entry(self):
-        """Edit docket entry."""
-        QMessageBox.information(self, "Edit", "Edit functionality coming soon.")
-
-    def _on_add_deadline_from_entry(self):
-        """Add deadline from selected entry."""
-        QMessageBox.information(self, "Add Deadline", "Add deadline functionality coming soon.")
-
-    def _on_delete_docket_entry(self):
-        """Delete docket entry."""
-        selected = self.docket_table.selectedItems()
-        if not selected:
+        if not entry:
             return
 
-        row = selected[0].row()
-        entry_id = self.docket_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        dialog = EditDocketEntryDialog(self, entry)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            entry['date'] = dialog.date
+            entry['text'] = dialog.text
+            entry['description'] = dialog.text
+            entry['filed_by'] = dialog.filed_by
+            entry['comments'] = dialog.comments
+            self._save_docket_data()
+            self._refresh_dockets()
+            self._on_timeline_entry_clicked(self._current_docket_entry_id)
+
+    def _on_delete_docket_entry(self):
+        """Delete the selected docket entry."""
+        if not self._current_docket_entry_id:
+            QMessageBox.information(self, "No Selection", "Please select a docket entry first.")
+            return
 
         reply = QMessageBox.question(
             self, "Confirm Delete",
-            "Delete this docket entry?",
+            "Delete this docket entry?\n\nNote: This won't renumber other entries.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             self._docket_data['entries'] = [
                 e for e in self._docket_data.get('entries', [])
-                if e.get('id') != entry_id
+                if e.get('id') != self._current_docket_entry_id
             ]
             self._save_docket_data()
+            self._clear_detail_view()
             self._refresh_dockets()
 
     def _create_case_content_widget(self, case: dict) -> QWidget:
@@ -7313,19 +7470,15 @@ class ManageExhibitTagsDialog(QDialog):
 # ========== Docket Dialogs ==========
 
 class AddDocketEntryDialog(QDialog):
-    """Dialog for adding a new docket entry."""
+    """Dialog for adding a new docket entry to the timeline."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, case_id: str, docket_data: dict):
         super().__init__(parent)
-        self.case_id = "178"
-        self.entry_number = ""
+        self.case_id = case_id
+        self._docket_data = docket_data
         self.date = ""
-        self.description = ""
-        self.document = ""
+        self.text = ""
         self.filed_by = ""
-        self.has_deadline = False
-        self.deadline_date = ""
-        self.deadline_description = ""
 
         self._setup_ui()
 
@@ -7335,64 +7488,42 @@ class AddDocketEntryDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
+        # Show next docket number info
+        next_num = self._docket_data.get('next_number', {}).get(self.case_id, 1)
+        info_label = QLabel(f"This entry will be assigned Docket Number: {next_num}")
+        info_label.setStyleSheet("font-weight: bold; color: #2c3e50; margin-bottom: 10px;")
+        layout.addWidget(info_label)
+
         # Form
         form = QFormLayout()
-
-        # Case
-        self.case_combo = QComboBox()
-        self.case_combo.addItem("Case 178 (Petrini v. City of Biloxi)", "178")
-        form.addRow("Case:", self.case_combo)
-
-        # Entry number
-        self.entry_number_edit = QLineEdit()
-        self.entry_number_edit.setPlaceholderText("e.g., 178")
-        form.addRow("Entry #:", self.entry_number_edit)
 
         # Date
         self.date_edit = QDateEdit()
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDate(QDate.currentDate())
-        form.addRow("Date:", self.date_edit)
+        form.addRow("Date Filed:", self.date_edit)
 
-        # Description
-        self.desc_edit = QTextEdit()
-        self.desc_edit.setMaximumHeight(100)
-        self.desc_edit.setPlaceholderText("Enter docket entry description...")
-        form.addRow("Description:", self.desc_edit)
-
-        # Document
-        self.doc_edit = QLineEdit()
-        self.doc_edit.setPlaceholderText("e.g., ECF No. 178")
-        form.addRow("Document:", self.doc_edit)
+        # Text/Description
+        self.text_edit = QTextEdit()
+        self.text_edit.setMinimumHeight(120)
+        self.text_edit.setPlaceholderText("Enter docket entry text (e.g., MOTION for Summary Judgment by Defendant...)")
+        form.addRow("Entry Text:", self.text_edit)
 
         # Filed by
-        self.filed_by_edit = QLineEdit()
-        self.filed_by_edit.setPlaceholderText("e.g., Plaintiff, Defendant, Court")
-        form.addRow("Filed By:", self.filed_by_edit)
+        self.filed_by_combo = QComboBox()
+        self.filed_by_combo.setEditable(True)
+        self.filed_by_combo.addItems([
+            "",
+            "Plaintiff",
+            "Defendant",
+            "Court",
+            "Clerk",
+            "Multiple Parties"
+        ])
+        self.filed_by_combo.setCurrentText("")
+        form.addRow("Filed By:", self.filed_by_combo)
 
         layout.addLayout(form)
-
-        # Deadline section
-        deadline_group = QGroupBox("Associated Deadline (Optional)")
-        deadline_layout = QFormLayout(deadline_group)
-
-        self.deadline_check = QCheckBox("Add deadline for this entry")
-        deadline_layout.addRow(self.deadline_check)
-
-        self.deadline_date_edit = QDateEdit()
-        self.deadline_date_edit.setCalendarPopup(True)
-        self.deadline_date_edit.setDate(QDate.currentDate().addDays(30))
-        self.deadline_date_edit.setEnabled(False)
-        deadline_layout.addRow("Deadline Date:", self.deadline_date_edit)
-
-        self.deadline_desc_edit = QLineEdit()
-        self.deadline_desc_edit.setPlaceholderText("e.g., Response to Motion due")
-        self.deadline_desc_edit.setEnabled(False)
-        deadline_layout.addRow("Deadline Description:", self.deadline_desc_edit)
-
-        self.deadline_check.toggled.connect(self._on_deadline_toggled)
-
-        layout.addWidget(deadline_group)
 
         # Buttons
         buttons = QDialogButtonBox(
@@ -7402,21 +7533,107 @@ class AddDocketEntryDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def _on_deadline_toggled(self, checked):
-        self.deadline_date_edit.setEnabled(checked)
-        self.deadline_desc_edit.setEnabled(checked)
+    def _on_accept(self):
+        self.date = self.date_edit.date().toString("yyyy-MM-dd")
+        self.text = self.text_edit.toPlainText().strip()
+        self.filed_by = self.filed_by_combo.currentText().strip()
+
+        if not self.text:
+            QMessageBox.warning(self, "Required Field", "Please enter the docket entry text.")
+            return
+
+        self.accept()
+
+
+class EditDocketEntryDialog(QDialog):
+    """Dialog for editing an existing docket entry."""
+
+    def __init__(self, parent, entry: dict):
+        super().__init__(parent)
+        self.entry = entry.copy()
+        self.date = entry.get('date', '')
+        self.text = entry.get('text', entry.get('description', ''))
+        self.filed_by = entry.get('filed_by', '')
+        self.comments = entry.get('comments', '')
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle("Edit Docket Entry")
+        self.setMinimumWidth(500)
+
+        layout = QVBoxLayout(self)
+
+        # Show docket number (read-only)
+        docket_num = self.entry.get('docket_number', '?')
+        info_label = QLabel(f"Docket Entry #{docket_num}")
+        info_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #2c3e50; margin-bottom: 10px;")
+        layout.addWidget(info_label)
+
+        # Form
+        form = QFormLayout()
+
+        # Date
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        if self.date:
+            try:
+                date_obj = QDate.fromString(self.date, "yyyy-MM-dd")
+                if date_obj.isValid():
+                    self.date_edit.setDate(date_obj)
+                else:
+                    self.date_edit.setDate(QDate.currentDate())
+            except:
+                self.date_edit.setDate(QDate.currentDate())
+        else:
+            self.date_edit.setDate(QDate.currentDate())
+        form.addRow("Date Filed:", self.date_edit)
+
+        # Text/Description
+        self.text_edit = QTextEdit()
+        self.text_edit.setMinimumHeight(120)
+        self.text_edit.setPlainText(self.text)
+        form.addRow("Entry Text:", self.text_edit)
+
+        # Filed by
+        self.filed_by_combo = QComboBox()
+        self.filed_by_combo.setEditable(True)
+        self.filed_by_combo.addItems([
+            "",
+            "Plaintiff",
+            "Defendant",
+            "Court",
+            "Clerk",
+            "Multiple Parties"
+        ])
+        self.filed_by_combo.setCurrentText(self.filed_by)
+        form.addRow("Filed By:", self.filed_by_combo)
+
+        # Comments
+        self.comments_edit = QTextEdit()
+        self.comments_edit.setMinimumHeight(80)
+        self.comments_edit.setPlaceholderText("Add your notes/comments about this entry...")
+        self.comments_edit.setPlainText(self.comments)
+        form.addRow("Comments:", self.comments_edit)
+
+        layout.addLayout(form)
+
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
     def _on_accept(self):
-        self.case_id = self.case_combo.currentData()
-        self.entry_number = self.entry_number_edit.text().strip()
         self.date = self.date_edit.date().toString("yyyy-MM-dd")
-        self.description = self.desc_edit.toPlainText().strip()
-        self.document = self.doc_edit.text().strip()
-        self.filed_by = self.filed_by_edit.text().strip()
+        self.text = self.text_edit.toPlainText().strip()
+        self.filed_by = self.filed_by_combo.currentText().strip()
+        self.comments = self.comments_edit.toPlainText().strip()
 
-        self.has_deadline = self.deadline_check.isChecked()
-        if self.has_deadline:
-            self.deadline_date = self.deadline_date_edit.date().toString("yyyy-MM-dd")
-            self.deadline_description = self.deadline_desc_edit.text().strip()
+        if not self.text:
+            QMessageBox.warning(self, "Required Field", "Please enter the docket entry text.")
+            return
 
         self.accept()
