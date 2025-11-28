@@ -2842,19 +2842,10 @@ class MainWindow(QMainWindow):
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
-        # Main content area with splitter
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Main content area - horizontal layout with list and button panel
+        main_layout = QHBoxLayout()
 
-        # Left side - Timeline scroll area
-        timeline_container = QWidget()
-        timeline_layout = QVBoxLayout(timeline_container)
-        timeline_layout.setContentsMargins(0, 0, 0, 0)
-
-        timeline_header = QLabel("Timeline")
-        timeline_header.setStyleSheet("font-size: 14px; font-weight: bold; color: #333; padding: 5px;")
-        timeline_layout.addWidget(timeline_header)
-
-        # Scrollable timeline
+        # Left side - Timeline scroll area (takes full height)
         self.timeline_scroll = QScrollArea()
         self.timeline_scroll.setWidgetResizable(True)
         self.timeline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -2872,117 +2863,153 @@ class MainWindow(QMainWindow):
         self.timeline_layout.addStretch()
 
         self.timeline_scroll.setWidget(self.timeline_widget)
-        timeline_layout.addWidget(self.timeline_scroll)
+        main_layout.addWidget(self.timeline_scroll, stretch=1)
 
-        main_splitter.addWidget(timeline_container)
+        # Right side - Vertical button panel
+        button_panel = QWidget()
+        button_panel.setFixedWidth(140)
+        button_layout = QVBoxLayout(button_panel)
+        button_layout.setContentsMargins(10, 0, 0, 0)
+        button_layout.setSpacing(10)
 
-        # Right side - Entry details and comments
-        detail_container = QWidget()
-        detail_layout = QVBoxLayout(detail_container)
-        detail_layout.setContentsMargins(10, 0, 0, 0)
-
-        detail_header = QLabel("Entry Details")
-        detail_header.setStyleSheet("font-size: 14px; font-weight: bold; color: #333; padding: 5px;")
-        detail_layout.addWidget(detail_header)
-
-        # Detail display area
-        self.docket_detail_frame = QFrame()
-        self.docket_detail_frame.setStyleSheet("""
-            QFrame {
-                background: white;
-                border: 1px solid #ddd;
-                border-radius: 5px;
-            }
-        """)
-        detail_frame_layout = QVBoxLayout(self.docket_detail_frame)
-
-        # Docket number display
-        self.docket_detail_number = QLabel("")
-        self.docket_detail_number.setStyleSheet("font-size: 24px; font-weight: bold; color: #4a90d9;")
-        detail_frame_layout.addWidget(self.docket_detail_number)
-
-        # Date display
-        self.docket_detail_date = QLabel("")
-        self.docket_detail_date.setStyleSheet("font-size: 12px; color: #666;")
-        detail_frame_layout.addWidget(self.docket_detail_date)
-
-        # Text/Description display
-        self.docket_detail_text = QLabel("")
-        self.docket_detail_text.setWordWrap(True)
-        self.docket_detail_text.setStyleSheet("font-size: 13px; color: #333; margin-top: 10px;")
-        detail_frame_layout.addWidget(self.docket_detail_text)
-
-        # Filed by
-        self.docket_detail_filed = QLabel("")
-        self.docket_detail_filed.setStyleSheet("font-size: 11px; color: #888; margin-top: 5px;")
-        detail_frame_layout.addWidget(self.docket_detail_filed)
-
-        detail_frame_layout.addStretch()
-        detail_layout.addWidget(self.docket_detail_frame)
-
-        # Comments section
-        comments_header = QLabel("Comments / Notes")
-        comments_header.setStyleSheet("font-size: 13px; font-weight: bold; color: #333; margin-top: 15px;")
-        detail_layout.addWidget(comments_header)
-
-        self.docket_comments_edit = QTextEdit()
-        self.docket_comments_edit.setPlaceholderText("Add your notes and comments about this docket entry...")
-        self.docket_comments_edit.setStyleSheet("""
-            QTextEdit {
-                border: 1px solid #ddd;
-                border-radius: 5px;
-                padding: 8px;
-                font-size: 12px;
-            }
-        """)
-        self.docket_comments_edit.textChanged.connect(self._on_docket_comment_changed)
-        detail_layout.addWidget(self.docket_comments_edit)
-
-        # Action buttons
-        action_layout = QHBoxLayout()
-
+        # Edit Entry button
         edit_btn = QPushButton("Edit Entry")
         edit_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2196F3;
                 color: white;
-                padding: 8px 16px;
+                padding: 12px 16px;
                 border: none;
                 border-radius: 5px;
                 font-weight: bold;
+                font-size: 12px;
             }
             QPushButton:hover {
                 background-color: #1976D2;
             }
         """)
         edit_btn.clicked.connect(self._on_edit_docket_entry)
-        action_layout.addWidget(edit_btn)
+        button_layout.addWidget(edit_btn)
 
+        # Delete button
         delete_btn = QPushButton("Delete")
         delete_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f44336;
                 color: white;
-                padding: 8px 16px;
+                padding: 12px 16px;
                 border: none;
                 border-radius: 5px;
                 font-weight: bold;
+                font-size: 12px;
             }
             QPushButton:hover {
                 background-color: #d32f2f;
             }
         """)
         delete_btn.clicked.connect(self._on_delete_docket_entry)
-        action_layout.addWidget(delete_btn)
+        button_layout.addWidget(delete_btn)
 
-        action_layout.addStretch()
-        detail_layout.addLayout(action_layout)
+        # Separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setStyleSheet("background-color: #ddd;")
+        button_layout.addWidget(separator)
 
-        main_splitter.addWidget(detail_container)
+        # Comments button
+        comments_btn = QPushButton("Comments")
+        comments_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9C27B0;
+                color: white;
+                padding: 12px 16px;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #7B1FA2;
+            }
+        """)
+        comments_btn.clicked.connect(self._on_show_docket_comments)
+        button_layout.addWidget(comments_btn)
 
-        # Set splitter sizes
-        main_splitter.setSizes([500, 400])
-        layout.addWidget(main_splitter)
+        # View Details button
+        details_btn = QPushButton("View Details")
+        details_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #607D8B;
+                color: white;
+                padding: 12px 16px;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #455A64;
+            }
+        """)
+        details_btn.clicked.connect(self._on_view_docket_details)
+        button_layout.addWidget(details_btn)
+
+        # Separator
+        separator2 = QFrame()
+        separator2.setFrameShape(QFrame.Shape.HLine)
+        separator2.setStyleSheet("background-color: #ddd;")
+        button_layout.addWidget(separator2)
+
+        # Attach Document button
+        attach_btn = QPushButton("Attach Doc")
+        attach_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                padding: 12px 16px;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+        """)
+        attach_btn.clicked.connect(self._on_attach_docket_document)
+        button_layout.addWidget(attach_btn)
+
+        # Open Attached button
+        open_attach_btn = QPushButton("Open Doc")
+        open_attach_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                padding: 12px 16px;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        open_attach_btn.clicked.connect(self._on_open_docket_document)
+        button_layout.addWidget(open_attach_btn)
+
+        button_layout.addStretch()
+        main_layout.addWidget(button_panel)
+
+        layout.addLayout(main_layout, stretch=1)
+
+        # Store reference for detail display (hidden initially, shown in dialogs)
+        self.docket_detail_number = QLabel("")
+        self.docket_detail_date = QLabel("")
+        self.docket_detail_text = QLabel("")
+        self.docket_detail_filed = QLabel("")
+        self.docket_comments_edit = QTextEdit()
+        self.docket_detail_frame = QFrame()
 
         # Initialize docket storage
         self._init_docket_storage()
@@ -3053,8 +3080,8 @@ class MainWindow(QMainWindow):
             entries = [e for e in entries if search_query in e.get('text', '').lower() or
                        search_query in e.get('description', '').lower()]
 
-        # Sort by docket number ascending
-        entries = sorted(entries, key=lambda x: x.get('docket_number', 0))
+        # Sort by docket number descending (newest first)
+        entries = sorted(entries, key=lambda x: (x.get('date', ''), x.get('docket_number', 0)), reverse=True)
 
         # Update count
         self.docket_count_label.setText(f"{len(entries)} entries")
@@ -3086,18 +3113,21 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
 
-        # Docket number circle
+        # Docket number circle - green if exhibit attached, blue otherwise
+        has_exhibit = bool(entry.get('attached_document'))
+        circle_color = "#2ecc71" if has_exhibit else "#4a90d9"  # Green for exhibit, blue otherwise
+
         number_label = QLabel(str(entry.get('docket_number', '')))
         number_label.setFixedSize(40, 40)
         number_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        number_label.setStyleSheet("""
-            QLabel {
-                background: #4a90d9;
+        number_label.setStyleSheet(f"""
+            QLabel {{
+                background: {circle_color};
                 color: white;
                 border-radius: 20px;
                 font-size: 14px;
                 font-weight: bold;
-            }
+            }}
         """)
         left_layout.addWidget(number_label, alignment=Qt.AlignmentFlag.AlignHCenter)
 
@@ -3106,7 +3136,7 @@ class MainWindow(QMainWindow):
             line = QFrame()
             line.setFixedWidth(2)
             line.setMinimumHeight(30)
-            line.setStyleSheet("background: #4a90d9;")
+            line.setStyleSheet(f"background: {circle_color};")
             left_layout.addWidget(line, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         left_layout.addStretch()
@@ -3132,68 +3162,73 @@ class MainWindow(QMainWindow):
         text_label.setStyleSheet("font-size: 12px; color: #333;")
         content_layout.addWidget(text_label)
 
-        # Comment indicator
+        # Indicators row
+        indicators_layout = QHBoxLayout()
+        indicators_layout.setSpacing(10)
+
         if entry.get('comments'):
-            comment_indicator = QLabel("💬 Has comments")
-            comment_indicator.setStyleSheet("font-size: 10px; color: #666;")
-            content_layout.addWidget(comment_indicator)
+            comment_indicator = QLabel("[Comments]")
+            comment_indicator.setStyleSheet("font-size: 10px; color: #9C27B0; font-weight: bold;")
+            indicators_layout.addWidget(comment_indicator)
+
+        if entry.get('attached_document'):
+            doc_indicator = QLabel("[PDF Attached]")
+            doc_indicator.setStyleSheet("font-size: 10px; color: #FF9800; font-weight: bold;")
+            indicators_layout.addWidget(doc_indicator)
+
+        indicators_layout.addStretch()
+        content_layout.addLayout(indicators_layout)
 
         layout.addWidget(content_widget, stretch=1)
 
-        # Style the widget
-        widget.setStyleSheet("""
-            QFrame {
-                background: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 5px;
-                margin-bottom: 5px;
-            }
-            QFrame:hover {
-                background: #f5f5f5;
-                border-color: #4a90d9;
-            }
-        """)
+        # Style the widget - light green background if exhibit attached
+        if has_exhibit:
+            widget.setStyleSheet("""
+                QFrame {
+                    background: #e8f8e8;
+                    border: 1px solid #2ecc71;
+                    border-radius: 5px;
+                    margin-bottom: 5px;
+                }
+                QFrame:hover {
+                    background: #d4f0d4;
+                    border-color: #27ae60;
+                }
+            """)
+        else:
+            widget.setStyleSheet("""
+                QFrame {
+                    background: white;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 5px;
+                    margin-bottom: 5px;
+                }
+                QFrame:hover {
+                    background: #f5f5f5;
+                    border-color: #4a90d9;
+                }
+            """)
 
         return widget
 
     def _on_timeline_entry_clicked(self, entry_id: str):
-        """Handle click on timeline entry."""
+        """Handle click on timeline entry - sets current entry for button actions."""
         self._current_docket_entry_id = entry_id
 
-        # Find entry
-        entry = None
-        for e in self._docket_data.get('entries', []):
-            if e.get('id') == entry_id:
-                entry = e
-                break
-
-        if not entry:
-            return
-
-        # Update detail view
-        self.docket_detail_number.setText(f"Docket #{entry.get('docket_number', '')}")
-        self.docket_detail_date.setText(f"Filed: {entry.get('date', '')}")
-        self.docket_detail_text.setText(entry.get('text', entry.get('description', '')))
-        self.docket_detail_filed.setText(f"Filed by: {entry.get('filed_by', 'N/A')}")
-
-        # Load comments without triggering save
-        self.docket_comments_edit.blockSignals(True)
-        self.docket_comments_edit.setText(entry.get('comments', ''))
-        self.docket_comments_edit.blockSignals(False)
-
     def _clear_detail_view(self):
-        """Clear the detail view."""
-        self.docket_detail_number.setText("")
-        self.docket_detail_date.setText("")
-        self.docket_detail_text.setText("")
-        self.docket_detail_filed.setText("")
-        self.docket_comments_edit.blockSignals(True)
-        self.docket_comments_edit.clear()
-        self.docket_comments_edit.blockSignals(False)
+        """Clear the selection."""
         self._current_docket_entry_id = None
 
     def _on_docket_comment_changed(self):
-        """Save comment when changed."""
+        """Save comment when changed (legacy - now uses dialog)."""
+        if not self._current_docket_entry_id:
+            return
+
+        # No longer needed - comments are saved via dialog
+        pass
+
+    def _on_docket_comment_changed_legacy(self):
+        """Legacy: Save comment when changed."""
         if not self._current_docket_entry_id:
             return
 
@@ -3307,6 +3342,227 @@ class MainWindow(QMainWindow):
             self._save_docket_data()
             self._clear_detail_view()
             self._refresh_dockets()
+
+    def _on_show_docket_comments(self):
+        """Show/edit comments for the selected docket entry."""
+        if not self._current_docket_entry_id:
+            QMessageBox.information(self, "No Selection", "Please select a docket entry first.")
+            return
+
+        # Find entry
+        entry = None
+        for e in self._docket_data.get('entries', []):
+            if e.get('id') == self._current_docket_entry_id:
+                entry = e
+                break
+
+        if not entry:
+            return
+
+        # Create comments dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Comments - Docket #{entry.get('docket_number', 0)}")
+        dialog.setMinimumSize(500, 350)
+
+        layout = QVBoxLayout(dialog)
+
+        # Entry info
+        info_label = QLabel(f"<b>#{entry.get('docket_number', 0)}</b> - {entry.get('date', '')}")
+        info_label.setStyleSheet("color: #4a90d9; font-size: 14px;")
+        layout.addWidget(info_label)
+
+        text_preview = QLabel(entry.get('text', '')[:200] + "..." if len(entry.get('text', '')) > 200 else entry.get('text', ''))
+        text_preview.setWordWrap(True)
+        text_preview.setStyleSheet("color: #666; font-size: 11px; margin-bottom: 10px;")
+        layout.addWidget(text_preview)
+
+        # Comments edit
+        comments_edit = QTextEdit()
+        comments_edit.setPlaceholderText("Add your notes and comments about this docket entry...")
+        comments_edit.setText(entry.get('comments', ''))
+        comments_edit.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                padding: 8px;
+                font-size: 12px;
+            }
+        """)
+        layout.addWidget(comments_edit)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        save_btn = QPushButton("Save Comments")
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #45a049; }
+        """)
+        save_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(save_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            entry['comments'] = comments_edit.toPlainText()
+            self._save_docket_data()
+
+    def _on_view_docket_details(self):
+        """View full details for the selected docket entry."""
+        if not self._current_docket_entry_id:
+            QMessageBox.information(self, "No Selection", "Please select a docket entry first.")
+            return
+
+        # Find entry
+        entry = None
+        for e in self._docket_data.get('entries', []):
+            if e.get('id') == self._current_docket_entry_id:
+                entry = e
+                break
+
+        if not entry:
+            return
+
+        # Create details dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Docket Entry #{entry.get('docket_number', 0)} Details")
+        dialog.setMinimumSize(600, 450)
+
+        layout = QVBoxLayout(dialog)
+
+        # Docket number
+        num_label = QLabel(f"#{entry.get('docket_number', 0)}")
+        num_label.setStyleSheet("font-size: 32px; font-weight: bold; color: #4a90d9;")
+        layout.addWidget(num_label)
+
+        # Date
+        date_label = QLabel(f"Date: {entry.get('date', 'N/A')}")
+        date_label.setStyleSheet("font-size: 14px; color: #666;")
+        layout.addWidget(date_label)
+
+        # Filed by
+        filed_label = QLabel(f"Filed by: {entry.get('filed_by', 'N/A')}")
+        filed_label.setStyleSheet("font-size: 12px; color: #888; margin-bottom: 15px;")
+        layout.addWidget(filed_label)
+
+        # Full text (scrollable)
+        text_label = QLabel("Docket Text:")
+        text_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(text_label)
+
+        text_scroll = QScrollArea()
+        text_scroll.setWidgetResizable(True)
+        text_scroll.setStyleSheet("border: 1px solid #ddd; background: white;")
+
+        text_widget = QLabel(entry.get('text', entry.get('description', '')))
+        text_widget.setWordWrap(True)
+        text_widget.setStyleSheet("padding: 10px; font-size: 12px;")
+        text_widget.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        text_scroll.setWidget(text_widget)
+        layout.addWidget(text_scroll)
+
+        # Comments (if any)
+        if entry.get('comments'):
+            comments_label = QLabel("Comments/Notes:")
+            comments_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+            layout.addWidget(comments_label)
+
+            comments_text = QLabel(entry.get('comments'))
+            comments_text.setWordWrap(True)
+            comments_text.setStyleSheet("color: #9C27B0; font-style: italic; padding: 5px;")
+            layout.addWidget(comments_text)
+
+        # Close button
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.exec()
+
+    def _on_attach_docket_document(self):
+        """Attach a document (PDF, etc.) to the selected docket entry."""
+        if not self._current_docket_entry_id:
+            QMessageBox.information(self, "No Selection", "Please select a docket entry first.")
+            return
+
+        # Find entry
+        entry = None
+        for e in self._docket_data.get('entries', []):
+            if e.get('id') == self._current_docket_entry_id:
+                entry = e
+                break
+
+        if not entry:
+            return
+
+        # Open file dialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Attach Document to Docket #{entry.get('docket_number', 0)}",
+            str(Path.home() / "Downloads"),
+            "Documents (*.pdf *.doc *.docx *.txt);;All Files (*)"
+        )
+
+        if file_path:
+            # Store path in entry
+            entry['attached_document'] = file_path
+            entry['attached_filename'] = Path(file_path).name
+            self._save_docket_data()
+            self._refresh_dockets()
+            QMessageBox.information(
+                self, "Document Attached",
+                f"Attached: {Path(file_path).name}\nto Docket #{entry.get('docket_number', 0)}"
+            )
+
+    def _on_open_docket_document(self):
+        """Open the attached document for the selected docket entry."""
+        if not self._current_docket_entry_id:
+            QMessageBox.information(self, "No Selection", "Please select a docket entry first.")
+            return
+
+        # Find entry
+        entry = None
+        for e in self._docket_data.get('entries', []):
+            if e.get('id') == self._current_docket_entry_id:
+                entry = e
+                break
+
+        if not entry:
+            return
+
+        doc_path = entry.get('attached_document', '')
+        if not doc_path:
+            QMessageBox.information(
+                self, "No Document",
+                f"No document attached to Docket #{entry.get('docket_number', 0)}.\n\nUse 'Attach Doc' to add one."
+            )
+            return
+
+        if not Path(doc_path).exists():
+            QMessageBox.warning(
+                self, "File Not Found",
+                f"The attached file no longer exists:\n{doc_path}"
+            )
+            return
+
+        # Open with default application
+        import subprocess
+        subprocess.run(['open', doc_path])
 
     def _create_case_content_widget(self, case: dict) -> QWidget:
         """Create the content widget for a single case."""
