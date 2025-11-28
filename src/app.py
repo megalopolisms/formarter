@@ -2456,15 +2456,53 @@ class MainWindow(QMainWindow):
         action_layout = QHBoxLayout()
 
         open_btn = QPushButton("Open")
+        open_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
         open_btn.clicked.connect(self._on_open_exhibit)
         action_layout.addWidget(open_btn)
 
         edit_btn = QPushButton("Edit")
+        edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
         edit_btn.clicked.connect(self._on_edit_exhibit)
         action_layout.addWidget(edit_btn)
 
         delete_btn = QPushButton("Delete")
-        delete_btn.setStyleSheet("QPushButton { color: #dc3545; }")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+        """)
         delete_btn.clicked.connect(self._on_delete_exhibit)
         action_layout.addWidget(delete_btn)
 
@@ -2904,11 +2942,36 @@ class MainWindow(QMainWindow):
         action_layout = QHBoxLayout()
 
         edit_btn = QPushButton("Edit Entry")
+        edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
         edit_btn.clicked.connect(self._on_edit_docket_entry)
         action_layout.addWidget(edit_btn)
 
         delete_btn = QPushButton("Delete")
-        delete_btn.setStyleSheet("QPushButton { color: #dc3545; }")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+        """)
         delete_btn.clicked.connect(self._on_delete_docket_entry)
         action_layout.addWidget(delete_btn)
 
