@@ -3148,6 +3148,105 @@ class MainWindow(QMainWindow):
         }
         return colors.get(entry_type, '#95a5a6')
 
+    def _calculate_deadlines(self, entry_date: str, entry_type: str, is_gov_party: bool = True) -> list:
+        """
+        Calculate response/appeal deadlines based on entry type and date.
+        Returns list of (action, deadline_date, days_remaining, rule) tuples.
+
+        Federal Rules:
+        - FRAP 4: Notice of Appeal = 30 days (60 if gov't party)
+        - Rule 59(e): Motion to Alter/Amend = 28 days
+        - Rule 60(b): Motion for Relief = 1 year
+        - Rule 54(b): Reconsideration = Before final judgment (flexible)
+        """
+        from datetime import datetime, timedelta
+
+        deadlines = []
+
+        try:
+            # Parse the entry date
+            if not entry_date:
+                return deadlines
+
+            date_obj = datetime.strptime(entry_date, "%Y-%m-%d")
+            today = datetime.now()
+
+            if entry_type in ['Order', 'Judgment']:
+                # Notice of Appeal deadline (FRAP Rule 4)
+                appeal_days = 60 if is_gov_party else 30
+                appeal_deadline = date_obj + timedelta(days=appeal_days)
+                days_remaining = (appeal_deadline - today).days
+                deadlines.append({
+                    'action': 'Notice of Appeal',
+                    'deadline': appeal_deadline.strftime("%Y-%m-%d"),
+                    'days_remaining': days_remaining,
+                    'rule': f'FRAP 4 ({appeal_days} days)',
+                    'urgent': days_remaining <= 7
+                })
+
+                # Motion to Alter/Amend (Rule 59(e))
+                alter_deadline = date_obj + timedelta(days=28)
+                days_remaining_59 = (alter_deadline - today).days
+                deadlines.append({
+                    'action': 'Motion to Alter/Amend',
+                    'deadline': alter_deadline.strftime("%Y-%m-%d"),
+                    'days_remaining': days_remaining_59,
+                    'rule': 'FRCP 59(e) (28 days)',
+                    'urgent': days_remaining_59 <= 7
+                })
+
+                # Motion for Relief (Rule 60(b))
+                relief_deadline = date_obj + timedelta(days=365)
+                days_remaining_60 = (relief_deadline - today).days
+                deadlines.append({
+                    'action': 'Motion for Relief',
+                    'deadline': relief_deadline.strftime("%Y-%m-%d"),
+                    'days_remaining': days_remaining_60,
+                    'rule': 'FRCP 60(b) (1 year)',
+                    'urgent': False
+                })
+
+            elif entry_type == 'Motion':
+                # Response to motion typically 14-21 days (varies by local rules)
+                response_deadline = date_obj + timedelta(days=21)
+                days_remaining = (response_deadline - today).days
+                deadlines.append({
+                    'action': 'Response to Motion',
+                    'deadline': response_deadline.strftime("%Y-%m-%d"),
+                    'days_remaining': days_remaining,
+                    'rule': 'Local Rules (~21 days)',
+                    'urgent': days_remaining <= 7
+                })
+
+            elif entry_type == 'Complaint':
+                # Answer deadline = 21 days (60 if waiver)
+                answer_deadline = date_obj + timedelta(days=21)
+                days_remaining = (answer_deadline - today).days
+                deadlines.append({
+                    'action': 'Answer/Response',
+                    'deadline': answer_deadline.strftime("%Y-%m-%d"),
+                    'days_remaining': days_remaining,
+                    'rule': 'FRCP 12(a)(1) (21 days)',
+                    'urgent': days_remaining <= 7
+                })
+
+            elif entry_type == 'Discovery':
+                # Objections typically 30 days
+                objection_deadline = date_obj + timedelta(days=30)
+                days_remaining = (objection_deadline - today).days
+                deadlines.append({
+                    'action': 'Response/Objections',
+                    'deadline': objection_deadline.strftime("%Y-%m-%d"),
+                    'days_remaining': days_remaining,
+                    'rule': 'FRCP 33/34 (30 days)',
+                    'urgent': days_remaining <= 7
+                })
+
+        except Exception as e:
+            print(f"Error calculating deadlines: {e}")
+
+        return deadlines
+
     def _refresh_dockets(self):
         """Refresh the timeline display."""
         # Clear existing timeline
@@ -3316,6 +3415,51 @@ class MainWindow(QMainWindow):
         indicators_layout.addStretch()
         content_layout.addLayout(indicators_layout)
 
+        # Add deadline display for Orders/Judgments/Motions
+        entry_date = entry.get('date', '')
+        if entry_type in ['Order', 'Judgment', 'Motion', 'Complaint']:
+            deadlines = self._calculate_deadlines(entry_date, entry_type, is_gov_party=True)
+            # Filter to show only pending deadlines
+            active_deadlines = [d for d in deadlines if d['days_remaining'] >= 0]
+
+            if active_deadlines:
+                deadlines_layout = QHBoxLayout()
+                deadlines_layout.setSpacing(5)
+
+                deadline_icon = QLabel("⏰")
+                deadline_icon.setStyleSheet("font-size: 11px;")
+                deadlines_layout.addWidget(deadline_icon)
+
+                for dl in active_deadlines[:2]:  # Show max 2 most urgent deadlines
+                    days = dl['days_remaining']
+                    if days <= 7:
+                        color = "#e74c3c"  # Red - urgent
+                        text_color = "white"
+                    elif days <= 21:
+                        color = "#f39c12"  # Orange - soon
+                        text_color = "white"
+                    else:
+                        color = "#27ae60"  # Green - future
+                        text_color = "white"
+
+                    deadline_text = f"{dl['action']}: {days}d"
+                    deadline_badge = QLabel(deadline_text)
+                    deadline_badge.setToolTip(f"{dl['rule']} - Due: {dl['deadline']}")
+                    deadline_badge.setStyleSheet(f"""
+                        QLabel {{
+                            font-size: 9px;
+                            color: {text_color};
+                            font-weight: bold;
+                            background: {color};
+                            border-radius: 3px;
+                            padding: 2px 5px;
+                        }}
+                    """)
+                    deadlines_layout.addWidget(deadline_badge)
+
+                deadlines_layout.addStretch()
+                content_layout.addLayout(deadlines_layout)
+
         layout.addWidget(content_widget, stretch=1)
 
         # Style the widget - light green background if exhibit attached
@@ -3390,6 +3534,10 @@ class MainWindow(QMainWindow):
         if not extracted_text and doc_path and Path(doc_path).exists():
             extracted_text = self.lawsuit_manager.extract_pdf_text(doc_path)
 
+        # Calculate deadlines for this entry
+        entry_type = entry.get('entry_type') or self._detect_entry_type(docket_text)
+        deadlines = self._calculate_deadlines(date, entry_type, is_gov_party=True)
+
         # Show dialog with full content
         dialog = DocketEntryDetailDialog(
             self,
@@ -3398,7 +3546,9 @@ class MainWindow(QMainWindow):
             docket_text=docket_text,
             extracted_text=extracted_text,
             comments=comments,
-            doc_path=doc_path
+            doc_path=doc_path,
+            entry_type=entry_type,
+            deadlines=deadlines
         )
         dialog.exec()
 
@@ -8203,10 +8353,14 @@ class DocketEntryDetailDialog(QDialog):
         docket_text: str,
         extracted_text: str,
         comments: str,
-        doc_path: str
+        doc_path: str,
+        entry_type: str = "",
+        deadlines: list = None
     ):
         super().__init__(parent)
         self.doc_path = doc_path
+        self.deadlines = deadlines or []
+        self.entry_type = entry_type
         self._setup_ui(docket_num, date, docket_text, extracted_text, comments)
 
     def _setup_ui(self, docket_num, date, docket_text, extracted_text, comments):
@@ -8225,10 +8379,81 @@ class DocketEntryDetailDialog(QDialog):
         """)
         layout.addWidget(header)
 
-        # Date
+        # Date and Entry Type
+        info_layout = QHBoxLayout()
         date_label = QLabel(f"Filed: {date}")
         date_label.setStyleSheet("font-size: 12px; color: #7f8c8d; padding-left: 10px;")
-        layout.addWidget(date_label)
+        info_layout.addWidget(date_label)
+
+        if self.entry_type:
+            type_label = QLabel(f"Type: {self.entry_type}")
+            type_label.setStyleSheet("font-size: 12px; color: #2980b9; padding-left: 20px; font-weight: bold;")
+            info_layout.addWidget(type_label)
+
+        info_layout.addStretch()
+        layout.addLayout(info_layout)
+
+        # Deadlines section (if any active deadlines)
+        active_deadlines = [d for d in self.deadlines if d.get('days_remaining', -1) >= 0]
+        if active_deadlines:
+            deadlines_frame = QFrame()
+            deadlines_frame.setStyleSheet("""
+                QFrame {
+                    background: #fef9e7;
+                    border: 1px solid #f39c12;
+                    border-radius: 5px;
+                    margin: 5px 10px;
+                    padding: 10px;
+                }
+            """)
+            dl_layout = QVBoxLayout(deadlines_frame)
+            dl_layout.setContentsMargins(10, 5, 10, 5)
+
+            dl_header = QLabel("Response/Appeal Deadlines")
+            dl_header.setStyleSheet("font-size: 13px; font-weight: bold; color: #d35400;")
+            dl_layout.addWidget(dl_header)
+
+            for dl in active_deadlines:
+                days = dl.get('days_remaining', 0)
+                if days <= 7:
+                    color = "#e74c3c"
+                    status = "URGENT"
+                elif days <= 21:
+                    color = "#f39c12"
+                    status = "Soon"
+                else:
+                    color = "#27ae60"
+                    status = ""
+
+                dl_row = QHBoxLayout()
+                action_label = QLabel(f"{dl['action']}")
+                action_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+                dl_row.addWidget(action_label)
+
+                deadline_label = QLabel(f"Due: {dl['deadline']} ({days} days)")
+                deadline_label.setStyleSheet(f"font-size: 12px; color: {color};")
+                dl_row.addWidget(deadline_label)
+
+                if status:
+                    status_label = QLabel(status)
+                    status_label.setStyleSheet(f"""
+                        font-size: 10px;
+                        color: white;
+                        font-weight: bold;
+                        background: {color};
+                        border-radius: 3px;
+                        padding: 2px 6px;
+                    """)
+                    dl_row.addWidget(status_label)
+
+                rule_label = QLabel(f"({dl['rule']})")
+                rule_label.setStyleSheet("font-size: 10px; color: #888;")
+                dl_row.addWidget(rule_label)
+
+                dl_row.addStretch()
+                dl_layout.addLayout(dl_row)
+
+            layout.addWidget(deadlines_frame)
 
         # Tabs for different content
         tabs = QTabWidget()
