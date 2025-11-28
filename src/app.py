@@ -57,6 +57,7 @@ from .case_law_extractor import CaseLawExtractor
 from .case_library import CaseLibrary, get_default_library_path
 from .exhibit_bank import ExhibitBank, get_default_exhibit_path
 from .models.exhibit import Exhibit, ExhibitTag, DEFAULT_TAGS, get_file_type
+from .models.lawsuit import LawsuitManager, Lawsuit
 from .widgets.filing_tree import FilingTreeWidget
 from .widgets.tag_picker import TagPickerDialog
 from .widgets.filter_bar import FilterBar
@@ -315,6 +316,12 @@ class MainWindow(QMainWindow):
 
         # Initialize case library
         self.case_library = CaseLibrary(get_default_library_path())
+
+        # Initialize lawsuit manager
+        self.lawsuit_manager = LawsuitManager()
+
+        # Current active lawsuit (for filtering dockets/exhibits)
+        self._active_lawsuit_number = "178"  # Default to case 178
 
         # Currently loaded document (None = new unsaved document)
         self._current_saved_doc: SavedDocument | None = None
@@ -2807,6 +2814,23 @@ class MainWindow(QMainWindow):
         import_btn.clicked.connect(self._on_import_pacer)
         toolbar_layout.addWidget(import_btn)
 
+        # Export Case button
+        export_btn = QPushButton("Export Case (TXT/JSON)")
+        export_btn.setStyleSheet("""
+            QPushButton {
+                background: #28a745;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background: #218838;
+            }
+        """)
+        export_btn.clicked.connect(self._on_export_case)
+        toolbar_layout.addWidget(export_btn)
+
         toolbar_layout.addStretch()
 
         # Entry count label
@@ -3172,9 +3196,31 @@ class MainWindow(QMainWindow):
             indicators_layout.addWidget(comment_indicator)
 
         if entry.get('attached_document'):
-            doc_indicator = QLabel("[PDF Attached]")
-            doc_indicator.setStyleSheet("font-size: 10px; color: #FF9800; font-weight: bold;")
-            indicators_layout.addWidget(doc_indicator)
+            doc_path = entry.get('attached_document')
+            doc_name = Path(doc_path).name if doc_path else "PDF"
+            # Truncate long names
+            if len(doc_name) > 30:
+                doc_name = doc_name[:27] + "..."
+
+            # Clickable PDF button
+            pdf_btn = QPushButton(f"📄 {doc_name}")
+            pdf_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            pdf_btn.setStyleSheet("""
+                QPushButton {
+                    font-size: 10px;
+                    color: #FF9800;
+                    font-weight: bold;
+                    background: transparent;
+                    border: 1px solid #FF9800;
+                    border-radius: 3px;
+                    padding: 2px 5px;
+                }
+                QPushButton:hover {
+                    background: #FFF3E0;
+                }
+            """)
+            pdf_btn.clicked.connect(lambda checked, p=doc_path: self._open_pdf_document(p))
+            indicators_layout.addWidget(pdf_btn)
 
         indicators_layout.addStretch()
         content_layout.addLayout(indicators_layout)
@@ -3211,9 +3257,59 @@ class MainWindow(QMainWindow):
 
         return widget
 
+    def _open_pdf_document(self, pdf_path: str):
+        """Open a PDF document in the default viewer."""
+        if pdf_path and Path(pdf_path).exists():
+            subprocess.run(['open', pdf_path])
+        else:
+            QMessageBox.warning(self, "File Not Found", f"PDF file not found:\n{pdf_path}")
+
     def _on_timeline_entry_clicked(self, entry_id: str):
-        """Handle click on timeline entry - sets current entry for button actions."""
+        """Handle click on timeline entry - shows full text dialog."""
         self._current_docket_entry_id = entry_id
+
+        # Find the entry
+        entry = None
+        for e in self._docket_data.get('entries', []):
+            if e.get('id') == entry_id:
+                entry = e
+                break
+
+        if not entry:
+            return
+
+        # Build full text content
+        docket_num = entry.get('docket_number', '')
+        date = entry.get('date', '')
+        docket_text = entry.get('text', entry.get('description', ''))
+        comments = entry.get('comments', '')
+        doc_path = entry.get('attached_document', '')
+
+        # Try to read extracted text
+        extracted_text = ""
+        case_number = entry.get('case_id', '178')
+        txt_path = Path.home() / f"Dropbox/Formarter Folder/lawsuits/case_{case_number}/docket_{docket_num:03d}.txt"
+        if txt_path.exists():
+            try:
+                extracted_text = txt_path.read_text(encoding='utf-8')
+            except:
+                pass
+
+        # If no pre-extracted text, try to extract from PDF
+        if not extracted_text and doc_path and Path(doc_path).exists():
+            extracted_text = self.lawsuit_manager.extract_pdf_text(doc_path)
+
+        # Show dialog with full content
+        dialog = DocketEntryDetailDialog(
+            self,
+            docket_num=docket_num,
+            date=date,
+            docket_text=docket_text,
+            extracted_text=extracted_text,
+            comments=comments,
+            doc_path=doc_path
+        )
+        dialog.exec()
 
     def _clear_detail_view(self):
         """Clear the selection."""
@@ -3284,6 +3380,53 @@ class MainWindow(QMainWindow):
                 self, "Import PACER",
                 "PACER import functionality coming soon.\n\n"
                 "For now, you can manually add docket entries."
+            )
+
+    def _on_export_case(self):
+        """Export the current case to TXT and JSON files."""
+        # Get current case number from filter
+        case_number = self.docket_case_filter.currentData()
+        if not case_number:
+            case_number = "178"  # Default
+
+        try:
+            # Extract texts from attached PDFs
+            texts = self.lawsuit_manager.extract_docket_texts(case_number)
+
+            # Generate full docket TXT
+            txt_path = self.lawsuit_manager.generate_full_docket_txt(case_number)
+
+            # Export case JSON
+            json_path = self.lawsuit_manager.export_case_json(case_number)
+
+            # Get summary
+            summary = self.lawsuit_manager.get_case_summary(case_number)
+
+            QMessageBox.information(
+                self,
+                "Case Exported",
+                f"Case {case_number} exported successfully!\n\n"
+                f"Files saved to:\n"
+                f"  ~/Dropbox/Formarter Folder/lawsuits/case_{case_number}/\n\n"
+                f"Summary:\n"
+                f"  - {summary['total_docket_entries']} docket entries\n"
+                f"  - {summary['entries_with_documents']} entries with documents\n"
+                f"  - {len(texts)} PDFs converted to text\n"
+                f"  - {summary['total_exhibits']} exhibits\n\n"
+                f"Generated files:\n"
+                f"  - full_docket.txt\n"
+                f"  - case_data.json\n"
+                f"  - docket_XXX.txt (for each attached PDF)"
+            )
+
+            # Open the folder in Finder
+            subprocess.run(['open', str(Path(txt_path).parent)])
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Failed to export case: {str(e)}"
             )
 
     def _on_docket_filter_changed(self, index):
@@ -7956,3 +8099,155 @@ class EditDocketEntryDialog(QDialog):
             return
 
         self.accept()
+
+
+class DocketEntryDetailDialog(QDialog):
+    """Dialog showing full docket entry details including extracted PDF text."""
+
+    def __init__(
+        self,
+        parent,
+        docket_num,
+        date: str,
+        docket_text: str,
+        extracted_text: str,
+        comments: str,
+        doc_path: str
+    ):
+        super().__init__(parent)
+        self.doc_path = doc_path
+        self._setup_ui(docket_num, date, docket_text, extracted_text, comments)
+
+    def _setup_ui(self, docket_num, date, docket_text, extracted_text, comments):
+        self.setWindowTitle(f"Docket Entry #{docket_num}")
+        self.setMinimumSize(700, 600)
+
+        layout = QVBoxLayout(self)
+
+        # Header
+        header = QLabel(f"Docket Entry #{docket_num}")
+        header.setStyleSheet("""
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+            padding: 10px;
+        """)
+        layout.addWidget(header)
+
+        # Date
+        date_label = QLabel(f"Filed: {date}")
+        date_label.setStyleSheet("font-size: 12px; color: #7f8c8d; padding-left: 10px;")
+        layout.addWidget(date_label)
+
+        # Tabs for different content
+        tabs = QTabWidget()
+
+        # Tab 1: Docket Text
+        docket_tab = QWidget()
+        docket_layout = QVBoxLayout(docket_tab)
+        docket_label = QLabel("Docket Entry Text:")
+        docket_label.setStyleSheet("font-weight: bold;")
+        docket_layout.addWidget(docket_label)
+
+        docket_edit = QTextEdit()
+        docket_edit.setPlainText(docket_text)
+        docket_edit.setReadOnly(True)
+        docket_edit.setStyleSheet("""
+            QTextEdit {
+                font-family: Georgia, serif;
+                font-size: 13px;
+                line-height: 1.5;
+                padding: 10px;
+            }
+        """)
+        docket_layout.addWidget(docket_edit)
+        tabs.addTab(docket_tab, "Docket Entry")
+
+        # Tab 2: Document Text (if available)
+        if extracted_text:
+            doc_tab = QWidget()
+            doc_layout = QVBoxLayout(doc_tab)
+
+            doc_header = QHBoxLayout()
+            doc_label = QLabel("Extracted Document Text:")
+            doc_label.setStyleSheet("font-weight: bold;")
+            doc_header.addWidget(doc_label)
+
+            if self.doc_path:
+                open_btn = QPushButton("Open PDF")
+                open_btn.setStyleSheet("""
+                    QPushButton {
+                        background: #3498db;
+                        color: white;
+                        border: none;
+                        padding: 5px 15px;
+                        border-radius: 3px;
+                    }
+                    QPushButton:hover { background: #2980b9; }
+                """)
+                open_btn.clicked.connect(self._open_pdf)
+                doc_header.addWidget(open_btn)
+
+            doc_header.addStretch()
+            doc_layout.addLayout(doc_header)
+
+            doc_edit = QTextEdit()
+            doc_edit.setPlainText(extracted_text)
+            doc_edit.setReadOnly(True)
+            doc_edit.setStyleSheet("""
+                QTextEdit {
+                    font-family: 'Courier New', monospace;
+                    font-size: 12px;
+                    padding: 10px;
+                }
+            """)
+            doc_layout.addWidget(doc_edit)
+
+            char_count = QLabel(f"Characters: {len(extracted_text):,}")
+            char_count.setStyleSheet("font-size: 10px; color: #888;")
+            doc_layout.addWidget(char_count)
+
+            tabs.addTab(doc_tab, f"Document Text ({len(extracted_text):,} chars)")
+
+        # Tab 3: Comments (if available)
+        if comments:
+            comments_tab = QWidget()
+            comments_layout = QVBoxLayout(comments_tab)
+            comments_label = QLabel("Your Comments:")
+            comments_label.setStyleSheet("font-weight: bold;")
+            comments_layout.addWidget(comments_label)
+
+            comments_edit = QTextEdit()
+            comments_edit.setPlainText(comments)
+            comments_edit.setReadOnly(True)
+            comments_edit.setStyleSheet("""
+                QTextEdit {
+                    font-size: 13px;
+                    padding: 10px;
+                    background: #fffde7;
+                }
+            """)
+            comments_layout.addWidget(comments_edit)
+            tabs.addTab(comments_tab, "Comments")
+
+        layout.addWidget(tabs)
+
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: #95a5a6;
+                color: white;
+                border: none;
+                padding: 8px 25px;
+                border-radius: 4px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background: #7f8c8d; }
+        """)
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+    def _open_pdf(self):
+        if self.doc_path and Path(self.doc_path).exists():
+            subprocess.run(['open', self.doc_path])
