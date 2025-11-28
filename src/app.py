@@ -2853,6 +2853,26 @@ class MainWindow(QMainWindow):
         self.docket_case_filter.currentIndexChanged.connect(self._on_docket_filter_changed)
         filter_layout.addWidget(self.docket_case_filter)
 
+        # Entry type filter
+        type_label = QLabel("Type:")
+        filter_layout.addWidget(type_label)
+
+        self.docket_type_filter = QComboBox()
+        self.docket_type_filter.addItem("All Types", "")
+        self.docket_type_filter.addItem("Order", "Order")
+        self.docket_type_filter.addItem("Motion", "Motion")
+        self.docket_type_filter.addItem("Response/Reply", "Response")
+        self.docket_type_filter.addItem("Notice", "Notice")
+        self.docket_type_filter.addItem("Complaint", "Complaint")
+        self.docket_type_filter.addItem("Summons", "Summons")
+        self.docket_type_filter.addItem("Discovery", "Discovery")
+        self.docket_type_filter.addItem("Subpoena", "Subpoena")
+        self.docket_type_filter.addItem("Judgment", "Judgment")
+        self.docket_type_filter.addItem("Other", "Other")
+        self.docket_type_filter.setMinimumWidth(140)
+        self.docket_type_filter.currentIndexChanged.connect(self._on_docket_filter_changed)
+        filter_layout.addWidget(self.docket_type_filter)
+
         # Search
         search_label = QLabel("Search:")
         filter_layout.addWidget(search_label)
@@ -3084,6 +3104,50 @@ class MainWindow(QMainWindow):
         self._docket_data["next_number"][case_id] = num + 1
         return num
 
+    def _detect_entry_type(self, text: str) -> str:
+        """Auto-detect entry type from docket text."""
+        text_lower = text.lower()
+
+        # Check for specific entry types (order matters - more specific first)
+        if 'order' in text_lower and ('granting' in text_lower or 'denying' in text_lower or 'dismissing' in text_lower):
+            return 'Order'
+        if 'order' in text_lower:
+            return 'Order'
+        if 'motion' in text_lower:
+            return 'Motion'
+        if 'response' in text_lower or 'reply' in text_lower or 'opposition' in text_lower:
+            return 'Response'
+        if 'notice' in text_lower:
+            return 'Notice'
+        if 'complaint' in text_lower:
+            return 'Complaint'
+        if 'summons' in text_lower:
+            return 'Summons'
+        if 'discovery' in text_lower or 'interrogatories' in text_lower or 'request for production' in text_lower:
+            return 'Discovery'
+        if 'subpoena' in text_lower:
+            return 'Subpoena'
+        if 'judgment' in text_lower or 'verdict' in text_lower:
+            return 'Judgment'
+
+        return 'Other'
+
+    def _get_entry_type_color(self, entry_type: str) -> str:
+        """Get color for entry type badge."""
+        colors = {
+            'Order': '#9b59b6',       # Purple
+            'Motion': '#3498db',      # Blue
+            'Response': '#2ecc71',    # Green
+            'Notice': '#f39c12',      # Orange
+            'Complaint': '#e74c3c',   # Red
+            'Summons': '#1abc9c',     # Teal
+            'Discovery': '#34495e',   # Dark gray
+            'Subpoena': '#e67e22',    # Dark orange
+            'Judgment': '#c0392b',    # Dark red
+            'Other': '#95a5a6',       # Gray
+        }
+        return colors.get(entry_type, '#95a5a6')
+
     def _refresh_dockets(self):
         """Refresh the timeline display."""
         # Clear existing timeline
@@ -3092,14 +3156,25 @@ class MainWindow(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
 
-        # Get filter
+        # Get filters
         case_filter = self.docket_case_filter.currentData() if hasattr(self, 'docket_case_filter') else "178"
+        type_filter = self.docket_type_filter.currentData() if hasattr(self, 'docket_type_filter') else ""
         search_query = self.docket_search_edit.text().lower() if hasattr(self, 'docket_search_edit') else ""
 
         # Filter entries
         entries = self._docket_data.get("entries", [])
         if case_filter:
             entries = [e for e in entries if e.get('case_id') == case_filter]
+
+        # Apply type filter (detect type from text if not stored)
+        if type_filter:
+            filtered_entries = []
+            for e in entries:
+                entry_type = e.get('entry_type') or self._detect_entry_type(e.get('text', ''))
+                if entry_type == type_filter:
+                    filtered_entries.append(e)
+            entries = filtered_entries
+
         if search_query:
             entries = [e for e in entries if search_query in e.get('text', '').lower() or
                        search_query in e.get('description', '').lower()]
@@ -3188,7 +3263,23 @@ class MainWindow(QMainWindow):
 
         # Indicators row
         indicators_layout = QHBoxLayout()
-        indicators_layout.setSpacing(10)
+        indicators_layout.setSpacing(8)
+
+        # Entry type badge (auto-detected or stored)
+        entry_type = entry.get('entry_type') or self._detect_entry_type(entry.get('text', ''))
+        type_color = self._get_entry_type_color(entry_type)
+        type_badge = QLabel(entry_type)
+        type_badge.setStyleSheet(f"""
+            QLabel {{
+                font-size: 10px;
+                color: white;
+                font-weight: bold;
+                background: {type_color};
+                border-radius: 3px;
+                padding: 2px 6px;
+            }}
+        """)
+        indicators_layout.addWidget(type_badge)
 
         if entry.get('comments'):
             comment_indicator = QLabel("[Comments]")
