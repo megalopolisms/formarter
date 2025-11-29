@@ -3380,6 +3380,17 @@ class MainWindow(QMainWindow):
         """)
         indicators_layout.addWidget(type_badge)
 
+        # Show "Signed by" for Orders/Judgments
+        signed_by = entry.get('signed_by', '')
+        if signed_by and entry_type in ['Order', 'Judgment']:
+            signed_label = QLabel(f"Signed by {signed_by}")
+            signed_label.setStyleSheet("""
+                font-size: 10px;
+                color: #8e44ad;
+                font-style: italic;
+            """)
+            indicators_layout.addWidget(signed_label)
+
         if entry.get('comments'):
             comment_indicator = QLabel("[Comments]")
             comment_indicator.setStyleSheet("font-size: 10px; color: #9C27B0; font-weight: bold;")
@@ -3583,7 +3594,16 @@ class MainWindow(QMainWindow):
         """Add a new docket entry with auto-numbering."""
         case_id = self.docket_case_filter.currentData() if hasattr(self, 'docket_case_filter') else "178"
 
-        dialog = AddDocketEntryDialog(self, case_id, self._docket_data)
+        # Get lawsuit info for judge/magistrate
+        lawsuit_info = {}
+        lawsuit = self.lawsuit_manager.get_lawsuit_by_number(case_id)
+        if lawsuit:
+            lawsuit_info = {
+                'judge': lawsuit.judge,
+                'magistrate': lawsuit.magistrate
+            }
+
+        dialog = AddDocketEntryDialog(self, case_id, self._docket_data, lawsuit_info)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             import uuid
 
@@ -3598,6 +3618,8 @@ class MainWindow(QMainWindow):
                 'text': dialog.text,
                 'description': dialog.text,  # Keep for compatibility
                 'filed_by': dialog.filed_by,
+                'entry_type': dialog.entry_type,
+                'signed_by': dialog.signed_by,
                 'comments': ''
             }
             self._docket_data['entries'].append(entry)
@@ -8175,13 +8197,16 @@ class ManageExhibitTagsDialog(QDialog):
 class AddDocketEntryDialog(QDialog):
     """Dialog for adding a new docket entry to the timeline."""
 
-    def __init__(self, parent, case_id: str, docket_data: dict):
+    def __init__(self, parent, case_id: str, docket_data: dict, lawsuit_info: dict = None):
         super().__init__(parent)
         self.case_id = case_id
         self._docket_data = docket_data
+        self._lawsuit_info = lawsuit_info or {}
         self.date = ""
         self.text = ""
         self.filed_by = ""
+        self.entry_type = ""
+        self.signed_by = ""
 
         self._setup_ui()
 
@@ -8200,11 +8225,46 @@ class AddDocketEntryDialog(QDialog):
         # Form
         form = QFormLayout()
 
+        # Entry Type
+        self.entry_type_combo = QComboBox()
+        self.entry_type_combo.addItems([
+            "",
+            "Order",
+            "Motion",
+            "Response",
+            "Notice",
+            "Complaint",
+            "Answer",
+            "Discovery",
+            "Judgment",
+            "Other"
+        ])
+        self.entry_type_combo.currentTextChanged.connect(self._on_entry_type_changed)
+        form.addRow("Entry Type:", self.entry_type_combo)
+
         # Date
         self.date_edit = QDateEdit()
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDate(QDate.currentDate())
         form.addRow("Date Filed:", self.date_edit)
+
+        # Signed By (for Orders/Judgments) - initially hidden
+        self.signed_by_label = QLabel("Signed By:")
+        self.signed_by_combo = QComboBox()
+        self.signed_by_combo.setEditable(True)
+        # Populate with judge and magistrate from lawsuit info
+        judge = self._lawsuit_info.get('judge', '')
+        magistrate = self._lawsuit_info.get('magistrate', '')
+        judges = [""]
+        if judge:
+            judges.append(f"Judge {judge}")
+        if magistrate:
+            judges.append(f"Magistrate {magistrate}")
+        self.signed_by_combo.addItems(judges)
+        form.addRow(self.signed_by_label, self.signed_by_combo)
+        # Initially hide signed by field
+        self.signed_by_label.setVisible(False)
+        self.signed_by_combo.setVisible(False)
 
         # Text/Description
         self.text_edit = QTextEdit()
@@ -8236,10 +8296,21 @@ class AddDocketEntryDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def _on_entry_type_changed(self, entry_type: str):
+        """Show/hide signed by field based on entry type."""
+        is_order = entry_type in ['Order', 'Judgment']
+        self.signed_by_label.setVisible(is_order)
+        self.signed_by_combo.setVisible(is_order)
+        # Auto-set filed by to Court for Orders
+        if is_order:
+            self.filed_by_combo.setCurrentText("Court")
+
     def _on_accept(self):
         self.date = self.date_edit.date().toString("yyyy-MM-dd")
         self.text = self.text_edit.toPlainText().strip()
         self.filed_by = self.filed_by_combo.currentText().strip()
+        self.entry_type = self.entry_type_combo.currentText().strip()
+        self.signed_by = self.signed_by_combo.currentText().strip()
 
         if not self.text:
             QMessageBox.warning(self, "Required Field", "Please enter the docket entry text.")
