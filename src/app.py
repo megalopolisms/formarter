@@ -2846,7 +2846,7 @@ class MainWindow(QMainWindow):
         return super().eventFilter(obj, event)
 
     def _handle_file_drop(self, file_paths: list, drop_pos):
-        """Handle files dropped onto the exhibit table."""
+        """Handle files dropped onto the exhibit table - adds directly without dialog."""
         # Determine target folder from drop position
         target_folder_id = self._get_drop_target_folder(drop_pos)
         if target_folder_id is None:
@@ -2859,31 +2859,24 @@ class MainWindow(QMainWindow):
             if not path.is_file():
                 continue
 
-            # Show metadata dialog for each file
-            dialog = ExhibitMetadataDialog(self, file_path, self.exhibit_bank.list_tags())
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                try:
-                    self.exhibit_bank.add_exhibit(
-                        file_path=file_path,
-                        title=dialog.title,
-                        tags=dialog.tags,
-                        folder_id=target_folder_id,
-                        description=dialog.description,
-                        notes=dialog.notes,
-                        source=dialog.source
-                    )
-                    added_count += 1
-                except Exception as e:
-                    QMessageBox.warning(
-                        self, "Error",
-                        f"Failed to add exhibit: {str(e)}"
-                    )
+            # Add exhibit directly using filename as title
+            try:
+                # Use filename without extension as title
+                title = path.stem
+                self.exhibit_bank.add_exhibit(
+                    file_path=file_path,
+                    title=title,
+                    tags=[],
+                    folder_id=target_folder_id,
+                    description="",
+                    notes="",
+                    source=""
+                )
+                added_count += 1
+            except Exception as e:
+                print(f"Failed to add exhibit {path.name}: {e}")
 
         if added_count > 0:
-            QMessageBox.information(
-                self, "Success",
-                f"Added {added_count} exhibit(s)"
-            )
             self._refresh_exhibit_list()
 
     def _get_drop_target_folder(self, pos) -> str:
