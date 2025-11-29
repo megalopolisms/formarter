@@ -153,6 +153,7 @@ class Exhibit:
             stored_filename=data.get('stored_filename', ''),
             thumbnail_filename=data.get('thumbnail_filename', ''),
             tags=data.get('tags', []),
+            folder_id=data.get('folder_id', ''),
             date_added=data.get('date_added', datetime.now().isoformat()),
             date_modified=data.get('date_modified', datetime.now().isoformat()),
             file_size=data.get('file_size', 0),

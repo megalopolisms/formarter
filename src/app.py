@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QScrollArea,
     QMessageBox,
+    QRadioButton,
     QSpinBox,
     QGroupBox,
     QCheckBox,
@@ -2349,6 +2350,40 @@ class MainWindow(QMainWindow):
         refresh_btn.clicked.connect(self._refresh_exhibit_list)
         toolbar_layout.addWidget(refresh_btn)
 
+        # Open File button
+        open_file_btn = QPushButton("Open File")
+        open_file_btn.setStyleSheet("""
+            QPushButton {
+                background: #17a2b8;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background: #138496;
+            }
+        """)
+        open_file_btn.clicked.connect(self._on_open_exhibit_file)
+        toolbar_layout.addWidget(open_file_btn)
+
+        # Generate Exhibit Tags button
+        gen_tags_btn = QPushButton("Generate Exhibit Tags")
+        gen_tags_btn.setStyleSheet("""
+            QPushButton {
+                background: #9b59b6;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background: #8e44ad;
+            }
+        """)
+        gen_tags_btn.clicked.connect(self._on_generate_exhibit_tags)
+        toolbar_layout.addWidget(gen_tags_btn)
+
         toolbar_layout.addStretch()
 
         # Stats label
@@ -3034,6 +3069,128 @@ class MainWindow(QMainWindow):
             self.exhibit_detail_desc.setText("")
             self.exhibit_detail_notes.setText("")
             self.exhibit_thumbnail.clear()
+
+    def _on_open_exhibit_file(self):
+        """Open the selected exhibit file in the default application."""
+        import subprocess
+        import platform
+
+        if not hasattr(self, '_current_exhibit_id') or not self._current_exhibit_id:
+            QMessageBox.information(self, "No Selection", "Please select an exhibit first.")
+            return
+
+        exhibit = self.exhibit_bank.get_exhibit(self._current_exhibit_id)
+        if not exhibit:
+            return
+
+        # Get the full path to the stored file
+        file_path = self.exhibit_bank.storage_dir / "files" / exhibit.stored_filename
+        if not file_path.exists():
+            QMessageBox.warning(self, "File Not Found", f"File not found: {file_path}")
+            return
+
+        # Open with default application
+        try:
+            if platform.system() == 'Darwin':  # macOS
+                subprocess.run(['open', str(file_path)])
+            elif platform.system() == 'Windows':
+                subprocess.run(['start', '', str(file_path)], shell=True)
+            else:  # Linux
+                subprocess.run(['xdg-open', str(file_path)])
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not open file: {e}")
+
+    def _on_generate_exhibit_tags(self):
+        """Generate exhibit tags for civil rules format (Exhibit A, B, C... or 1, 2, 3...)."""
+        # Get all exhibits in current folder
+        contents = self.exhibit_bank.get_folder_contents(self._current_folder_id)
+        exhibits = contents.get('exhibits', [])
+
+        if not exhibits:
+            QMessageBox.information(self, "No Exhibits", "No exhibits in current folder to tag.")
+            return
+
+        # Ask user for format preference
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Generate Exhibit Tags")
+        dialog.setMinimumWidth(300)
+        layout = QVBoxLayout(dialog)
+
+        layout.addWidget(QLabel("Choose exhibit numbering format:"))
+
+        # Radio buttons for format
+        letter_radio = QRadioButton("Letters (Exhibit A, B, C...)")
+        letter_radio.setChecked(True)
+        layout.addWidget(letter_radio)
+
+        number_radio = QRadioButton("Numbers (Exhibit 1, 2, 3...)")
+        layout.addWidget(number_radio)
+
+        plaintiff_radio = QRadioButton("Plaintiff format (PX-1, PX-2...)")
+        layout.addWidget(plaintiff_radio)
+
+        defendant_radio = QRadioButton("Defendant format (DX-1, DX-2...)")
+        layout.addWidget(defendant_radio)
+
+        # Starting value
+        start_layout = QHBoxLayout()
+        start_layout.addWidget(QLabel("Start from:"))
+        start_edit = QLineEdit("1")
+        start_edit.setMaximumWidth(50)
+        start_layout.addWidget(start_edit)
+        start_layout.addStretch()
+        layout.addLayout(start_layout)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        apply_btn = QPushButton("Apply Tags")
+        apply_btn.setStyleSheet("background: #4a90d9; color: white;")
+        apply_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(apply_btn)
+        layout.addLayout(btn_layout)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        # Generate tags
+        try:
+            start = int(start_edit.text()) - 1
+        except ValueError:
+            start = 0
+
+        updated_count = 0
+        for i, exhibit in enumerate(exhibits):
+            idx = start + i
+
+            if letter_radio.isChecked():
+                # A-Z, then AA, AB, etc.
+                if idx < 26:
+                    tag = chr(65 + idx)  # A=65
+                else:
+                    first = chr(65 + (idx // 26) - 1)
+                    second = chr(65 + (idx % 26))
+                    tag = first + second
+                new_title = f"Exhibit {tag}"
+            elif number_radio.isChecked():
+                new_title = f"Exhibit {idx + 1}"
+            elif plaintiff_radio.isChecked():
+                new_title = f"PX-{idx + 1}"
+            else:  # defendant
+                new_title = f"DX-{idx + 1}"
+
+            # Update the exhibit title
+            self.exhibit_bank.update_exhibit(exhibit.id, title=new_title)
+            updated_count += 1
+
+        self._refresh_exhibit_list()
+        QMessageBox.information(
+            self, "Tags Generated",
+            f"Updated {updated_count} exhibit(s) with civil rules format tags."
+        )
 
     # ========== Dockets Tab (Timeline View) ==========
 
