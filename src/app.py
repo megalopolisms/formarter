@@ -3297,7 +3297,12 @@ class MainWindow(QMainWindow):
         filter_layout.addWidget(case_label)
 
         self.docket_case_filter = QComboBox()
-        self.docket_case_filter.addItem("Case 178 (Petrini v. City of Biloxi)", "178")
+        # Load all cases from lawsuit manager
+        for lawsuit in self.lawsuit_manager.list_lawsuits():
+            self.docket_case_filter.addItem(
+                f"Case {lawsuit.case_number} ({lawsuit.short_name})",
+                lawsuit.case_number
+            )
         self.docket_case_filter.setMinimumWidth(280)
         self.docket_case_filter.currentIndexChanged.connect(self._on_docket_filter_changed)
         filter_layout.addWidget(self.docket_case_filter)
