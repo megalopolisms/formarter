@@ -2465,6 +2465,16 @@ class MainWindow(QMainWindow):
         self.exhibit_table.customContextMenuRequested.connect(self._on_exhibit_context_menu)
         self.exhibit_table.cellDoubleClicked.connect(self._on_exhibit_double_clicked)
 
+        # Enable drag and drop for file import and internal reordering
+        self.exhibit_table.setAcceptDrops(True)
+        self.exhibit_table.setDragEnabled(True)
+        self.exhibit_table.setDragDropMode(QTableWidget.DragDropMode.DragDrop)
+        self.exhibit_table.viewport().setAcceptDrops(True)
+        self.exhibit_table.setDropIndicatorShown(True)
+
+        # Install event filter to handle drops
+        self.exhibit_table.viewport().installEventFilter(self)
+
         list_layout.addWidget(self.exhibit_table)
         content_splitter.addWidget(list_widget)
 
@@ -2781,6 +2791,116 @@ class MainWindow(QMainWindow):
         else:
             # Open exhibit
             self._on_open_exhibit()
+
+    def eventFilter(self, obj, event):
+        """Handle drag and drop events for the exhibit table."""
+        from PyQt6.QtCore import QEvent, QMimeData, QUrl
+        from PyQt6.QtGui import QDragEnterEvent, QDropEvent
+
+        # Only handle events for exhibit table viewport
+        if hasattr(self, 'exhibit_table') and obj == self.exhibit_table.viewport():
+            if event.type() == QEvent.Type.DragEnter:
+                mime_data = event.mimeData()
+                if mime_data.hasUrls():
+                    # Check if any URLs are files
+                    for url in mime_data.urls():
+                        if url.isLocalFile():
+                            event.acceptProposedAction()
+                            return True
+                # Check for internal drag (exhibit/folder)
+                if mime_data.hasFormat("application/x-exhibit-id"):
+                    event.acceptProposedAction()
+                    return True
+
+            elif event.type() == QEvent.Type.DragMove:
+                mime_data = event.mimeData()
+                if mime_data.hasUrls() or mime_data.hasFormat("application/x-exhibit-id"):
+                    event.acceptProposedAction()
+                    return True
+
+            elif event.type() == QEvent.Type.Drop:
+                mime_data = event.mimeData()
+
+                # Handle file drops from filesystem
+                if mime_data.hasUrls():
+                    file_paths = []
+                    for url in mime_data.urls():
+                        if url.isLocalFile():
+                            file_paths.append(url.toLocalFile())
+
+                    if file_paths:
+                        self._handle_file_drop(file_paths, event.position().toPoint())
+                        event.acceptProposedAction()
+                        return True
+
+                # Handle internal exhibit/folder drag
+                elif mime_data.hasFormat("application/x-exhibit-id"):
+                    exhibit_id = mime_data.data("application/x-exhibit-id").data().decode()
+                    target_folder_id = self._get_drop_target_folder(event.position().toPoint())
+                    if target_folder_id is not None:
+                        self.exhibit_bank.move_exhibit_to_folder(exhibit_id, target_folder_id)
+                        self._refresh_exhibit_list()
+                        event.acceptProposedAction()
+                        return True
+
+        return super().eventFilter(obj, event)
+
+    def _handle_file_drop(self, file_paths: list, drop_pos):
+        """Handle files dropped onto the exhibit table."""
+        # Determine target folder from drop position
+        target_folder_id = self._get_drop_target_folder(drop_pos)
+        if target_folder_id is None:
+            target_folder_id = self._current_folder_id
+
+        added_count = 0
+        for file_path in file_paths:
+            # Check if it's a valid file
+            path = Path(file_path)
+            if not path.is_file():
+                continue
+
+            # Show metadata dialog for each file
+            dialog = ExhibitMetadataDialog(self, file_path, self.exhibit_bank.list_tags())
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                try:
+                    self.exhibit_bank.add_exhibit(
+                        file_path=file_path,
+                        title=dialog.title,
+                        tags=dialog.tags,
+                        folder_id=target_folder_id,
+                        description=dialog.description,
+                        notes=dialog.notes,
+                        source=dialog.source
+                    )
+                    added_count += 1
+                except Exception as e:
+                    QMessageBox.warning(
+                        self, "Error",
+                        f"Failed to add exhibit: {str(e)}"
+                    )
+
+        if added_count > 0:
+            QMessageBox.information(
+                self, "Success",
+                f"Added {added_count} exhibit(s)"
+            )
+            self._refresh_exhibit_list()
+
+    def _get_drop_target_folder(self, pos) -> str:
+        """Get the folder ID at the drop position, or None for root."""
+        # Get item at drop position
+        item = self.exhibit_table.itemAt(pos)
+        if item:
+            row = item.row()
+            title_item = self.exhibit_table.item(row, 0)
+            if title_item:
+                item_type = title_item.data(Qt.ItemDataRole.UserRole + 1)
+                if item_type == "folder":
+                    # Dropping onto a folder
+                    return title_item.data(Qt.ItemDataRole.UserRole)
+
+        # Not dropping on a folder, use current folder
+        return self._current_folder_id
 
     def _on_exhibit_selected(self):
         """Handle exhibit selection."""
