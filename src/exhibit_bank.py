@@ -25,7 +25,7 @@ except ImportError:
     HAS_PIL = False
 
 from src.models.exhibit import (
-    Exhibit, ExhibitTag, DEFAULT_TAGS, get_file_type
+    Exhibit, ExhibitTag, ExhibitFolder, DEFAULT_TAGS, get_file_type
 )
 
 
@@ -76,13 +76,18 @@ class ExhibitBank:
                 self._exhibits = [
                     Exhibit.from_dict(e) for e in data.get("exhibits", [])
                 ]
+                self._folders = [
+                    ExhibitFolder.from_dict(f) for f in data.get("folders", [])
+                ]
             except (json.JSONDecodeError, KeyError) as e:
                 print(f"Error loading exhibit index: {e}")
                 self._tags = list(DEFAULT_TAGS)
                 self._exhibits = []
+                self._folders = []
         else:
             self._tags = list(DEFAULT_TAGS)
             self._exhibits = []
+            self._folders = []
             self._save_index()
 
     def _save_index(self):
@@ -90,7 +95,8 @@ class ExhibitBank:
         index_path = self.storage_dir / self.INDEX_FILENAME
         data = {
             "tags": [t.to_dict() for t in self._tags],
-            "exhibits": [e.to_dict() for e in self._exhibits]
+            "exhibits": [e.to_dict() for e in self._exhibits],
+            "folders": [f.to_dict() for f in self._folders]
         }
         with open(index_path, 'w') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -102,6 +108,7 @@ class ExhibitBank:
         file_path: str,
         title: str,
         tags: List[str] = None,
+        folder_id: str = "",
         description: str = "",
         notes: str = "",
         source: str = ""
@@ -113,6 +120,7 @@ class ExhibitBank:
             file_path: Path to the source file.
             title: Short descriptive title.
             tags: List of tag names.
+            folder_id: ID of folder to place exhibit in (empty for root).
             description: Longer description.
             notes: Additional notes.
             source: Where this exhibit came from.
@@ -133,6 +141,7 @@ class ExhibitBank:
             original_filename=src_path.name,
             file_type=file_type,
             tags=tags or [],
+            folder_id=folder_id,
             description=description,
             notes=notes,
             source=source
@@ -182,6 +191,8 @@ class ExhibitBank:
                     exhibit.notes = kwargs['notes']
                 if 'source' in kwargs:
                     exhibit.source = kwargs['source']
+                if 'folder_id' in kwargs:
+                    exhibit.folder_id = kwargs['folder_id']
 
                 exhibit.date_modified = datetime.now().isoformat()
                 self._exhibits[i] = exhibit
@@ -313,6 +324,142 @@ class ExhibitBank:
     def get_exhibits_by_tag(self, tag_name: str) -> List[Exhibit]:
         """Get all exhibits with a specific tag."""
         return [e for e in self._exhibits if tag_name in e.tags]
+
+    # ========== Folder Management ==========
+
+    def list_folders(self) -> List[ExhibitFolder]:
+        """List all folders."""
+        return list(self._folders)
+
+    def get_folder(self, folder_id: str) -> Optional[ExhibitFolder]:
+        """Get folder by ID."""
+        for folder in self._folders:
+            if folder.id == folder_id:
+                return folder
+        return None
+
+    def create_folder(self, name: str, parent_id: str = "", color: str = "#3498db") -> ExhibitFolder:
+        """Create a new folder."""
+        folder = ExhibitFolder.create(name, parent_id, color)
+        self._folders.append(folder)
+        self._save_index()
+        return folder
+
+    def update_folder(self, folder_id: str, **kwargs) -> Optional[ExhibitFolder]:
+        """Update folder properties."""
+        for i, folder in enumerate(self._folders):
+            if folder.id == folder_id:
+                if 'name' in kwargs:
+                    folder.name = kwargs['name']
+                if 'parent_id' in kwargs:
+                    folder.parent_id = kwargs['parent_id']
+                if 'color' in kwargs:
+                    folder.color = kwargs['color']
+                folder.date_modified = datetime.now().isoformat()
+                self._folders[i] = folder
+                self._save_index()
+                return folder
+        return None
+
+    def delete_folder(self, folder_id: str, move_to_root: bool = True) -> bool:
+        """
+        Delete a folder.
+
+        Args:
+            folder_id: ID of folder to delete.
+            move_to_root: If True, move contents to root. If False, delete contents.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        for i, folder in enumerate(self._folders):
+            if folder.id == folder_id:
+                if move_to_root:
+                    # Move exhibits to root
+                    for exhibit in self._exhibits:
+                        if exhibit.folder_id == folder_id:
+                            exhibit.folder_id = ""
+                    # Move subfolders to root
+                    for subfolder in self._folders:
+                        if subfolder.parent_id == folder_id:
+                            subfolder.parent_id = ""
+                else:
+                    # Delete exhibits in folder
+                    exhibits_to_delete = [e.id for e in self._exhibits if e.folder_id == folder_id]
+                    for exhibit_id in exhibits_to_delete:
+                        self.delete_exhibit(exhibit_id)
+                    # Recursively delete subfolders
+                    subfolders_to_delete = [f.id for f in self._folders if f.parent_id == folder_id]
+                    for subfolder_id in subfolders_to_delete:
+                        self.delete_folder(subfolder_id, move_to_root=False)
+
+                del self._folders[i]
+                self._save_index()
+                return True
+        return False
+
+    def get_folder_contents(self, folder_id: str = "") -> dict:
+        """
+        Get contents of a folder.
+
+        Args:
+            folder_id: Folder ID, or empty string for root.
+
+        Returns:
+            Dict with 'folders' and 'exhibits' lists.
+        """
+        subfolders = [f for f in self._folders if f.parent_id == folder_id]
+        exhibits = [e for e in self._exhibits if e.folder_id == folder_id]
+
+        return {
+            'folders': subfolders,
+            'exhibits': exhibits
+        }
+
+    def get_folder_path(self, folder_id: str) -> List[ExhibitFolder]:
+        """
+        Get the path from root to the given folder.
+
+        Returns:
+            List of folders from root to target (inclusive).
+        """
+        path = []
+        current_id = folder_id
+
+        while current_id:
+            folder = self.get_folder(current_id)
+            if folder:
+                path.insert(0, folder)
+                current_id = folder.parent_id
+            else:
+                break
+
+        return path
+
+    def move_exhibit_to_folder(self, exhibit_id: str, folder_id: str) -> bool:
+        """Move an exhibit to a different folder."""
+        result = self.update_exhibit(exhibit_id, folder_id=folder_id)
+        return result is not None
+
+    def move_folder(self, folder_id: str, new_parent_id: str) -> bool:
+        """Move a folder to a different parent."""
+        # Prevent moving folder into itself or its descendants
+        if folder_id == new_parent_id:
+            return False
+
+        # Check if new_parent_id is a descendant of folder_id
+        current = new_parent_id
+        while current:
+            if current == folder_id:
+                return False
+            folder = self.get_folder(current)
+            if folder:
+                current = folder.parent_id
+            else:
+                break
+
+        result = self.update_folder(folder_id, parent_id=new_parent_id)
+        return result is not None
 
     # ========== Thumbnail Generation ==========
 

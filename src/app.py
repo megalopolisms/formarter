@@ -2261,6 +2261,7 @@ class MainWindow(QMainWindow):
 
         # Initialize exhibit bank
         self.exhibit_bank = ExhibitBank()
+        self._current_folder_id = ""  # Empty string = root folder
 
         # Header
         header = QLabel("Exhibit Bank")
@@ -2295,6 +2296,24 @@ class MainWindow(QMainWindow):
         """)
         add_exhibit_btn.clicked.connect(self._on_add_exhibit)
         toolbar_layout.addWidget(add_exhibit_btn)
+
+        # New Folder button
+        new_folder_btn = QPushButton("+ New Folder")
+        new_folder_btn.setStyleSheet("""
+            QPushButton {
+                background: #f39c12;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #e67e22;
+            }
+        """)
+        new_folder_btn.clicked.connect(self._on_create_folder)
+        toolbar_layout.addWidget(new_folder_btn)
 
         # Manage Tags button
         manage_tags_btn = QPushButton("Manage Tags")
@@ -2380,6 +2399,47 @@ class MainWindow(QMainWindow):
         filter_layout.addStretch()
         layout.addLayout(filter_layout)
 
+        # Folder navigation / breadcrumb bar
+        folder_nav_layout = QHBoxLayout()
+        folder_nav_layout.setContentsMargins(0, 5, 0, 5)
+
+        self.folder_breadcrumb = QLabel("Root")
+        self.folder_breadcrumb.setStyleSheet("""
+            QLabel {
+                font-size: 13px;
+                color: #333;
+                padding: 5px 10px;
+                background: #f8f9fa;
+                border-radius: 5px;
+            }
+        """)
+        folder_nav_layout.addWidget(self.folder_breadcrumb)
+
+        # Up button (go to parent folder)
+        self.folder_up_btn = QPushButton("Up")
+        self.folder_up_btn.setStyleSheet("""
+            QPushButton {
+                background: #e9ecef;
+                color: #333;
+                border: none;
+                padding: 5px 12px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background: #dee2e6;
+            }
+            QPushButton:disabled {
+                background: #f8f9fa;
+                color: #adb5bd;
+            }
+        """)
+        self.folder_up_btn.clicked.connect(self._on_folder_up)
+        self.folder_up_btn.setEnabled(False)
+        folder_nav_layout.addWidget(self.folder_up_btn)
+
+        folder_nav_layout.addStretch()
+        layout.addLayout(folder_nav_layout)
+
         # Main content area with splitter
         content_splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -2403,6 +2463,7 @@ class MainWindow(QMainWindow):
         self.exhibit_table.itemSelectionChanged.connect(self._on_exhibit_selected)
         self.exhibit_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.exhibit_table.customContextMenuRequested.connect(self._on_exhibit_context_menu)
+        self.exhibit_table.cellDoubleClicked.connect(self._on_exhibit_double_clicked)
 
         list_layout.addWidget(self.exhibit_table)
         content_splitter.addWidget(list_widget)
@@ -2551,6 +2612,7 @@ class MainWindow(QMainWindow):
                         file_path=file_path,
                         title=dialog.title,
                         tags=dialog.tags,
+                        folder_id=self._current_folder_id,
                         description=dialog.description,
                         notes=dialog.notes,
                         source=dialog.source
@@ -2584,28 +2646,67 @@ class MainWindow(QMainWindow):
         tag_filter = self.exhibit_tag_filter.currentData() if hasattr(self, 'exhibit_tag_filter') else None
         type_filter = self.exhibit_type_filter.currentData() if hasattr(self, 'exhibit_type_filter') else None
 
-        # Search exhibits
-        tags = [tag_filter] if tag_filter else None
-        exhibits = self.exhibit_bank.search(query=query, tags=tags, file_type=type_filter if type_filter else None)
+        # Update breadcrumb navigation
+        self._update_folder_breadcrumb()
 
-        # Update table
-        self.exhibit_table.setRowCount(len(exhibits))
-        for i, exhibit in enumerate(exhibits):
+        # If there's a search query, search all exhibits (ignore folders)
+        if query or tag_filter or type_filter:
+            tags = [tag_filter] if tag_filter else None
+            exhibits = self.exhibit_bank.search(query=query, tags=tags, file_type=type_filter if type_filter else None)
+            folders = []
+        else:
+            # Get folder contents
+            contents = self.exhibit_bank.get_folder_contents(self._current_folder_id)
+            folders = contents['folders']
+            exhibits = contents['exhibits']
+
+        # Update table - folders first, then exhibits
+        total_rows = len(folders) + len(exhibits)
+        self.exhibit_table.setRowCount(total_rows)
+
+        row = 0
+        # Add folders first
+        for folder in folders:
+            # Folder icon + name
+            title_item = QTableWidgetItem(f"[Folder] {folder.name}")
+            title_item.setData(Qt.ItemDataRole.UserRole, folder.id)
+            title_item.setData(Qt.ItemDataRole.UserRole + 1, "folder")  # Type marker
+            title_item.setForeground(QColor("#f39c12"))  # Orange for folders
+            font = title_item.font()
+            font.setBold(True)
+            title_item.setFont(font)
+            self.exhibit_table.setItem(row, 0, title_item)
+
+            # Type
+            type_item = QTableWidgetItem("Folder")
+            type_item.setForeground(QColor("#f39c12"))
+            self.exhibit_table.setItem(row, 1, type_item)
+
+            # Empty cells for folder
+            self.exhibit_table.setItem(row, 2, QTableWidgetItem(""))
+            date_str = folder.date_created[:10] if folder.date_created else ""
+            self.exhibit_table.setItem(row, 3, QTableWidgetItem(date_str))
+            self.exhibit_table.setItem(row, 4, QTableWidgetItem(""))
+            row += 1
+
+        # Add exhibits
+        for exhibit in exhibits:
             # Title
             title_item = QTableWidgetItem(exhibit.title)
             title_item.setData(Qt.ItemDataRole.UserRole, exhibit.id)
-            self.exhibit_table.setItem(i, 0, title_item)
+            title_item.setData(Qt.ItemDataRole.UserRole + 1, "exhibit")  # Type marker
+            self.exhibit_table.setItem(row, 0, title_item)
 
             # Type
-            self.exhibit_table.setItem(i, 1, QTableWidgetItem(exhibit.file_type))
+            self.exhibit_table.setItem(row, 1, QTableWidgetItem(exhibit.file_type))
 
             # Tags
             tags_str = ", ".join(exhibit.tags) if exhibit.tags else ""
-            self.exhibit_table.setItem(i, 2, QTableWidgetItem(tags_str))
+            self.exhibit_table.setItem(row, 2, QTableWidgetItem(tags_str))
 
             # Date
             date_str = exhibit.date_added[:10] if exhibit.date_added else ""
-            self.exhibit_table.setItem(i, 3, QTableWidgetItem(date_str))
+            self.exhibit_table.setItem(row, 3, QTableWidgetItem(date_str))
 
             # Size
             size_kb = exhibit.file_size / 1024
@@ -2613,13 +2714,25 @@ class MainWindow(QMainWindow):
                 size_str = f"{size_kb/1024:.1f} MB"
             else:
                 size_str = f"{size_kb:.1f} KB"
-            self.exhibit_table.setItem(i, 4, QTableWidgetItem(size_str))
+            self.exhibit_table.setItem(row, 4, QTableWidgetItem(size_str))
+            row += 1
 
         # Update stats
         stats = self.exhibit_bank.get_stats()
         self.exhibit_stats_label.setText(
             f"{stats['total_exhibits']} exhibits | {stats['total_size_mb']} MB"
         )
+
+    def _update_folder_breadcrumb(self):
+        """Update the folder breadcrumb navigation."""
+        if not self._current_folder_id:
+            self.folder_breadcrumb.setText("Root")
+            self.folder_up_btn.setEnabled(False)
+        else:
+            path = self.exhibit_bank.get_folder_path(self._current_folder_id)
+            path_names = ["Root"] + [f.name for f in path]
+            self.folder_breadcrumb.setText(" > ".join(path_names))
+            self.folder_up_btn.setEnabled(True)
 
     def _on_exhibit_search_changed(self, text):
         """Handle search text change."""
@@ -2629,6 +2742,46 @@ class MainWindow(QMainWindow):
         """Handle filter change."""
         self._refresh_exhibit_list()
 
+    def _on_create_folder(self):
+        """Create a new folder in the current directory."""
+        name, ok = QInputDialog.getText(
+            self, "Create Folder", "Folder name:",
+            QLineEdit.EchoMode.Normal, ""
+        )
+        if ok and name.strip():
+            self.exhibit_bank.create_folder(
+                name=name.strip(),
+                parent_id=self._current_folder_id
+            )
+            self._refresh_exhibit_list()
+
+    def _on_folder_up(self):
+        """Navigate to parent folder."""
+        if self._current_folder_id:
+            folder = self.exhibit_bank.get_folder(self._current_folder_id)
+            if folder:
+                self._current_folder_id = folder.parent_id
+            else:
+                self._current_folder_id = ""
+            self._refresh_exhibit_list()
+
+    def _on_exhibit_double_clicked(self, row, column):
+        """Handle double-click on table row."""
+        title_item = self.exhibit_table.item(row, 0)
+        if not title_item:
+            return
+
+        item_type = title_item.data(Qt.ItemDataRole.UserRole + 1)
+        item_id = title_item.data(Qt.ItemDataRole.UserRole)
+
+        if item_type == "folder":
+            # Navigate into folder
+            self._current_folder_id = item_id
+            self._refresh_exhibit_list()
+        else:
+            # Open exhibit
+            self._on_open_exhibit()
+
     def _on_exhibit_selected(self):
         """Handle exhibit selection."""
         selected = self.exhibit_table.selectedItems()
@@ -2636,8 +2789,24 @@ class MainWindow(QMainWindow):
             return
 
         row = selected[0].row()
-        exhibit_id = self.exhibit_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        exhibit = self.exhibit_bank.get_exhibit(exhibit_id)
+        title_item = self.exhibit_table.item(row, 0)
+        item_type = title_item.data(Qt.ItemDataRole.UserRole + 1)
+        item_id = title_item.data(Qt.ItemDataRole.UserRole)
+
+        # If folder is selected, show folder info instead of exhibit
+        if item_type == "folder":
+            folder = self.exhibit_bank.get_folder(item_id)
+            if folder:
+                self.exhibit_detail_title.setText(folder.name)
+                self.exhibit_detail_info.setText("Type: Folder")
+                self.exhibit_detail_tags.setText("")
+                self.exhibit_detail_desc.setText("Double-click to open folder")
+                self.exhibit_detail_notes.setText("")
+                self.exhibit_thumbnail.setText("[FOLDER]")
+                self._current_exhibit_id = None
+            return
+
+        exhibit = self.exhibit_bank.get_exhibit(item_id)
 
         if not exhibit:
             return

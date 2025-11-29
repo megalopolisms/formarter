@@ -11,6 +11,52 @@ from typing import List, Optional
 
 
 @dataclass
+class ExhibitFolder:
+    """Folder for organizing exhibits."""
+
+    id: str
+    name: str
+    parent_id: str  # Parent folder ID, empty string for root
+    color: str  # Hex color for UI display
+    date_created: str
+    date_modified: str
+
+    @classmethod
+    def create(cls, name: str, parent_id: str = "", color: str = "#3498db") -> "ExhibitFolder":
+        """Create a new folder."""
+        now = datetime.now().isoformat()
+        return cls(
+            id=str(uuid.uuid4()),
+            name=name,
+            parent_id=parent_id,
+            color=color,
+            date_created=now,
+            date_modified=now
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'name': self.name,
+            'parent_id': self.parent_id,
+            'color': self.color,
+            'date_created': self.date_created,
+            'date_modified': self.date_modified
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ExhibitFolder":
+        return cls(
+            id=data.get('id', str(uuid.uuid4())),
+            name=data.get('name', 'Untitled'),
+            parent_id=data.get('parent_id', ''),
+            color=data.get('color', '#3498db'),
+            date_created=data.get('date_created', datetime.now().isoformat()),
+            date_modified=data.get('date_modified', datetime.now().isoformat())
+        )
+
+
+@dataclass
 class Exhibit:
     """Represents an exhibit in the exhibit bank."""
 
@@ -22,6 +68,7 @@ class Exhibit:
     stored_filename: str  # Renamed for storage
     thumbnail_filename: str  # For preview
     tags: List[str]  # User-defined tags for search/filtering
+    folder_id: str  # Folder ID, empty string for root
     date_added: str
     date_modified: str
     file_size: int  # bytes
@@ -38,6 +85,7 @@ class Exhibit:
         original_filename: str,
         file_type: str,
         tags: List[str] = None,
+        folder_id: str = "",
         description: str = "",
         notes: str = "",
         source: str = ""
@@ -60,6 +108,7 @@ class Exhibit:
             stored_filename=stored_filename,
             thumbnail_filename=thumbnail_filename,
             tags=tags or [],
+            folder_id=folder_id,
             date_added=now,
             date_modified=now,
             file_size=0,
@@ -81,6 +130,7 @@ class Exhibit:
             'stored_filename': self.stored_filename,
             'thumbnail_filename': self.thumbnail_filename,
             'tags': self.tags,
+            'folder_id': self.folder_id,
             'date_added': self.date_added,
             'date_modified': self.date_modified,
             'file_size': self.file_size,
