@@ -2483,13 +2483,13 @@ class MainWindow(QMainWindow):
         list_layout = QVBoxLayout(list_widget)
         list_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.exhibit_table = QTableWidget()
+        self.exhibit_table = QTreeWidget()
         self.exhibit_table.setColumnCount(5)
-        self.exhibit_table.setHorizontalHeaderLabels(["Title", "Type", "Tags", "Date Added", "Size"])
-        self.exhibit_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.exhibit_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.exhibit_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.exhibit_table.horizontalHeader().setStretchLastSection(True)
+        self.exhibit_table.setHeaderLabels(["Title", "Type", "Tags", "Date Added", "Size"])
+        self.exhibit_table.setSelectionBehavior(QTreeWidget.SelectionBehavior.SelectRows)
+        self.exhibit_table.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
+        self.exhibit_table.setEditTriggers(QTreeWidget.EditTrigger.NoEditTriggers)
+        self.exhibit_table.header().setStretchLastSection(True)
         self.exhibit_table.setColumnWidth(0, 250)  # Title
         self.exhibit_table.setColumnWidth(1, 80)   # Type
         self.exhibit_table.setColumnWidth(2, 150)  # Tags
@@ -2498,12 +2498,12 @@ class MainWindow(QMainWindow):
         self.exhibit_table.itemSelectionChanged.connect(self._on_exhibit_selected)
         self.exhibit_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.exhibit_table.customContextMenuRequested.connect(self._on_exhibit_context_menu)
-        self.exhibit_table.cellDoubleClicked.connect(self._on_exhibit_double_clicked)
+        self.exhibit_table.itemDoubleClicked.connect(self._on_exhibit_double_clicked)
 
         # Enable drag and drop for file import and internal reordering
         self.exhibit_table.setAcceptDrops(True)
         self.exhibit_table.setDragEnabled(True)
-        self.exhibit_table.setDragDropMode(QTableWidget.DragDropMode.DragDrop)
+        self.exhibit_table.setDragDropMode(QTreeWidget.DragDropMode.DragDrop)
         self.exhibit_table.viewport().setAcceptDrops(True)
         self.exhibit_table.setDropIndicatorShown(True)
 
@@ -2685,7 +2685,7 @@ class MainWindow(QMainWindow):
             self.exhibit_tag_filter.addItem(tag.name, tag.name)
 
     def _refresh_exhibit_list(self):
-        """Refresh the exhibit list table."""
+        """Refresh the exhibit list tree with collapsible folders."""
         # Get current filters
         query = self.exhibit_search_edit.text() if hasattr(self, 'exhibit_search_edit') else ""
         tag_filter = self.exhibit_tag_filter.currentData() if hasattr(self, 'exhibit_tag_filter') else None
@@ -2694,79 +2694,86 @@ class MainWindow(QMainWindow):
         # Update breadcrumb navigation
         self._update_folder_breadcrumb()
 
-        # If there's a search query, search all exhibits (ignore folders)
+        # Clear the tree
+        self.exhibit_table.clear()
+
+        # If there's a search query, search all exhibits (flat view)
         if query or tag_filter or type_filter:
             tags = [tag_filter] if tag_filter else None
             exhibits = self.exhibit_bank.search(query=query, tags=tags, file_type=type_filter if type_filter else None)
-            folders = []
+            # Add exhibits as flat items
+            for exhibit in exhibits:
+                item = self._create_exhibit_tree_item(exhibit)
+                self.exhibit_table.addTopLevelItem(item)
         else:
-            # Get folder contents
-            contents = self.exhibit_bank.get_folder_contents(self._current_folder_id)
-            folders = contents['folders']
-            exhibits = contents['exhibits']
-
-        # Update table - folders first, then exhibits
-        total_rows = len(folders) + len(exhibits)
-        self.exhibit_table.setRowCount(total_rows)
-
-        row = 0
-        # Add folders first
-        for folder in folders:
-            # Folder icon + name
-            title_item = QTableWidgetItem(f"[Folder] {folder.name}")
-            title_item.setData(Qt.ItemDataRole.UserRole, folder.id)
-            title_item.setData(Qt.ItemDataRole.UserRole + 1, "folder")  # Type marker
-            title_item.setForeground(QColor("#f39c12"))  # Orange for folders
-            font = title_item.font()
-            font.setBold(True)
-            title_item.setFont(font)
-            self.exhibit_table.setItem(row, 0, title_item)
-
-            # Type
-            type_item = QTableWidgetItem("Folder")
-            type_item.setForeground(QColor("#f39c12"))
-            self.exhibit_table.setItem(row, 1, type_item)
-
-            # Empty cells for folder
-            self.exhibit_table.setItem(row, 2, QTableWidgetItem(""))
-            date_str = folder.date_created[:10] if folder.date_created else ""
-            self.exhibit_table.setItem(row, 3, QTableWidgetItem(date_str))
-            self.exhibit_table.setItem(row, 4, QTableWidgetItem(""))
-            row += 1
-
-        # Add exhibits
-        for exhibit in exhibits:
-            # Title
-            title_item = QTableWidgetItem(exhibit.title)
-            title_item.setData(Qt.ItemDataRole.UserRole, exhibit.id)
-            title_item.setData(Qt.ItemDataRole.UserRole + 1, "exhibit")  # Type marker
-            self.exhibit_table.setItem(row, 0, title_item)
-
-            # Type
-            self.exhibit_table.setItem(row, 1, QTableWidgetItem(exhibit.file_type))
-
-            # Tags
-            tags_str = ", ".join(exhibit.tags) if exhibit.tags else ""
-            self.exhibit_table.setItem(row, 2, QTableWidgetItem(tags_str))
-
-            # Date
-            date_str = exhibit.date_added[:10] if exhibit.date_added else ""
-            self.exhibit_table.setItem(row, 3, QTableWidgetItem(date_str))
-
-            # Size
-            size_kb = exhibit.file_size / 1024
-            if size_kb > 1024:
-                size_str = f"{size_kb/1024:.1f} MB"
-            else:
-                size_str = f"{size_kb:.1f} KB"
-            self.exhibit_table.setItem(row, 4, QTableWidgetItem(size_str))
-            row += 1
+            # Get all folders and exhibits recursively for tree view
+            self._populate_tree_recursive(self._current_folder_id, None)
 
         # Update stats
         stats = self.exhibit_bank.get_stats()
         self.exhibit_stats_label.setText(
             f"{stats['total_exhibits']} exhibits | {stats['total_size_mb']} MB"
         )
+
+    def _populate_tree_recursive(self, parent_folder_id: str, parent_item):
+        """Recursively populate tree with folders and their contents."""
+        contents = self.exhibit_bank.get_folder_contents(parent_folder_id)
+        folders = contents['folders']
+        exhibits = contents['exhibits']
+
+        # Add folders first (as collapsible items)
+        for folder in folders:
+            folder_item = QTreeWidgetItem()
+            folder_item.setText(0, folder.name)
+            folder_item.setText(1, "Folder")
+            folder_item.setText(2, "")
+            folder_item.setText(3, folder.date_created[:10] if folder.date_created else "")
+            folder_item.setText(4, "")
+            folder_item.setData(0, Qt.ItemDataRole.UserRole, folder.id)
+            folder_item.setData(0, Qt.ItemDataRole.UserRole + 1, "folder")
+            folder_item.setForeground(0, QColor("#f39c12"))
+            folder_item.setForeground(1, QColor("#f39c12"))
+            font = folder_item.font(0)
+            font.setBold(True)
+            folder_item.setFont(0, font)
+
+            if parent_item:
+                parent_item.addChild(folder_item)
+            else:
+                self.exhibit_table.addTopLevelItem(folder_item)
+
+            # Recursively add children
+            self._populate_tree_recursive(folder.id, folder_item)
+
+            # Expand folder by default
+            folder_item.setExpanded(True)
+
+        # Add exhibits
+        for exhibit in exhibits:
+            exhibit_item = self._create_exhibit_tree_item(exhibit)
+            if parent_item:
+                parent_item.addChild(exhibit_item)
+            else:
+                self.exhibit_table.addTopLevelItem(exhibit_item)
+
+    def _create_exhibit_tree_item(self, exhibit) -> QTreeWidgetItem:
+        """Create a tree item for an exhibit."""
+        item = QTreeWidgetItem()
+        item.setText(0, exhibit.title)
+        item.setText(1, exhibit.file_type)
+        tags_str = ", ".join(exhibit.tags) if exhibit.tags else ""
+        item.setText(2, tags_str)
+        date_str = exhibit.date_added[:10] if exhibit.date_added else ""
+        item.setText(3, date_str)
+        size_kb = exhibit.file_size / 1024
+        if size_kb > 1024:
+            size_str = f"{size_kb/1024:.1f} MB"
+        else:
+            size_str = f"{size_kb:.1f} KB"
+        item.setText(4, size_str)
+        item.setData(0, Qt.ItemDataRole.UserRole, exhibit.id)
+        item.setData(0, Qt.ItemDataRole.UserRole + 1, "exhibit")
+        return item
 
     def _update_folder_breadcrumb(self):
         """Update the folder breadcrumb navigation."""
@@ -2810,19 +2817,17 @@ class MainWindow(QMainWindow):
                 self._current_folder_id = ""
             self._refresh_exhibit_list()
 
-    def _on_exhibit_double_clicked(self, row, column):
-        """Handle double-click on table row."""
-        title_item = self.exhibit_table.item(row, 0)
-        if not title_item:
+    def _on_exhibit_double_clicked(self, item, column):
+        """Handle double-click on tree item."""
+        if not item:
             return
 
-        item_type = title_item.data(Qt.ItemDataRole.UserRole + 1)
-        item_id = title_item.data(Qt.ItemDataRole.UserRole)
+        item_type = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        item_id = item.data(0, Qt.ItemDataRole.UserRole)
 
         if item_type == "folder":
-            # Navigate into folder
-            self._current_folder_id = item_id
-            self._refresh_exhibit_list()
+            # Toggle folder expansion instead of navigating
+            item.setExpanded(not item.isExpanded())
         else:
             # Open exhibit
             self._on_open_exhibit()
@@ -2915,31 +2920,36 @@ class MainWindow(QMainWindow):
             self._refresh_exhibit_list()
 
     def _get_drop_target_folder(self, pos) -> str:
-        """Get the folder ID at the drop position, or None for root."""
-        # Get item at drop position
+        """Get the folder ID at the drop position, or current folder."""
+        # Get item at drop position (QTreeWidget)
         item = self.exhibit_table.itemAt(pos)
         if item:
-            row = item.row()
-            title_item = self.exhibit_table.item(row, 0)
-            if title_item:
-                item_type = title_item.data(Qt.ItemDataRole.UserRole + 1)
-                if item_type == "folder":
-                    # Dropping onto a folder
-                    return title_item.data(Qt.ItemDataRole.UserRole)
+            item_type = item.data(0, Qt.ItemDataRole.UserRole + 1)
+            if item_type == "folder":
+                # Dropping onto a folder
+                return item.data(0, Qt.ItemDataRole.UserRole)
+            # If dropping onto an exhibit, get its parent folder
+            parent = item.parent()
+            if parent:
+                return parent.data(0, Qt.ItemDataRole.UserRole)
 
         # Not dropping on a folder, use current folder
         return self._current_folder_id
 
     def _on_exhibit_selected(self):
         """Handle exhibit selection."""
-        selected = self.exhibit_table.selectedItems()
-        if not selected:
+        current_item = self.exhibit_table.currentItem()
+        if not current_item:
             return
 
-        row = selected[0].row()
-        title_item = self.exhibit_table.item(row, 0)
-        item_type = title_item.data(Qt.ItemDataRole.UserRole + 1)
-        item_id = title_item.data(Qt.ItemDataRole.UserRole)
+        # Get the tree item (column 0 contains the data)
+        tree_item = current_item
+        if current_item.treeWidget().currentColumn() != 0:
+            # Get parent item for column 0 data
+            tree_item = self.exhibit_table.currentItem()
+
+        item_type = tree_item.data(0, Qt.ItemDataRole.UserRole + 1)
+        item_id = tree_item.data(0, Qt.ItemDataRole.UserRole)
 
         # If folder is selected, show folder info instead of exhibit
         if item_type == "folder":
