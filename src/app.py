@@ -2980,7 +2980,7 @@ class MainWindow(QMainWindow):
         self.exhibit_detail_notes.setText(exhibit.notes or "No notes")
 
         # Load thumbnail
-        thumb_path = self.exhibit_bank.get_thumbnail_path(exhibit_id)
+        thumb_path = self.exhibit_bank.get_thumbnail_path(item_id)
         if thumb_path and thumb_path.exists():
             pixmap = QPixmap(str(thumb_path))
             scaled = pixmap.scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
@@ -2989,7 +2989,7 @@ class MainWindow(QMainWindow):
             self.exhibit_thumbnail.setText(f"[{exhibit.file_type.upper()}]")
 
         # Store current exhibit ID
-        self._current_exhibit_id = exhibit_id
+        self._current_exhibit_id = item_id
 
     def _on_exhibit_context_menu(self, pos):
         """Show context menu for exhibit."""
