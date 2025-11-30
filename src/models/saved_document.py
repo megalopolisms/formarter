@@ -19,22 +19,39 @@ class SectionData:
 
 @dataclass
 class Annotation:
-    """A note attached to highlighted text in the document."""
+    """A note that can be standalone or linked to a paragraph.
+
+    When linked to a paragraph:
+    - paragraph_number is set (1-indexed)
+    - paragraph_preview shows first ~50 chars of paragraph
+    - The note "moves" with the paragraph when text changes
+
+    When standalone (unlinked):
+    - paragraph_number is None
+    - paragraph_preview may still contain the last linked text for reference
+    """
     id: str
-    start_pos: int  # Character position where highlight starts
-    end_pos: int  # Character position where highlight ends
-    highlighted_text: str  # The text that was selected
     note: str  # User's note/comment
+    paragraph_number: Optional[int] = None  # 1-indexed paragraph number, None = standalone
+    paragraph_preview: str = ""  # First ~50 chars of the linked paragraph
     color: str = "#FFFF00"  # Highlight color (default yellow)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    @property
+    def is_linked(self) -> bool:
+        """Check if this note is linked to a paragraph."""
+        return self.paragraph_number is not None
+
+    def unlink(self):
+        """Unlink this note from its paragraph (make it standalone)."""
+        self.paragraph_number = None
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
-            "start_pos": self.start_pos,
-            "end_pos": self.end_pos,
-            "highlighted_text": self.highlighted_text,
             "note": self.note,
+            "paragraph_number": self.paragraph_number,
+            "paragraph_preview": self.paragraph_preview,
             "color": self.color,
             "created_at": self.created_at,
         }
@@ -43,10 +60,9 @@ class Annotation:
     def from_dict(cls, data: dict) -> "Annotation":
         return cls(
             id=data.get("id", str(uuid.uuid4())),
-            start_pos=data.get("start_pos", 0),
-            end_pos=data.get("end_pos", 0),
-            highlighted_text=data.get("highlighted_text", ""),
             note=data.get("note", ""),
+            paragraph_number=data.get("paragraph_number"),  # Can be None
+            paragraph_preview=data.get("paragraph_preview", ""),
             color=data.get("color", "#FFFF00"),
             created_at=data.get("created_at", datetime.now().isoformat()),
         )
