@@ -18,6 +18,41 @@ class SectionData:
 
 
 @dataclass
+class Annotation:
+    """A note attached to highlighted text in the document."""
+    id: str
+    start_pos: int  # Character position where highlight starts
+    end_pos: int  # Character position where highlight ends
+    highlighted_text: str  # The text that was selected
+    note: str  # User's note/comment
+    color: str = "#FFFF00"  # Highlight color (default yellow)
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "start_pos": self.start_pos,
+            "end_pos": self.end_pos,
+            "highlighted_text": self.highlighted_text,
+            "note": self.note,
+            "color": self.color,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Annotation":
+        return cls(
+            id=data.get("id", str(uuid.uuid4())),
+            start_pos=data.get("start_pos", 0),
+            end_pos=data.get("end_pos", 0),
+            highlighted_text=data.get("highlighted_text", ""),
+            note=data.get("note", ""),
+            color=data.get("color", "#FFFF00"),
+            created_at=data.get("created_at", datetime.now().isoformat()),
+        )
+
+
+@dataclass
 class SavedDocument:
     """
     A saved document with all state needed to restore the editor.
@@ -62,6 +97,9 @@ class SavedDocument:
     # Path to saved PDF (relative to storage directory)
     pdf_filename: Optional[str] = None
 
+    # Annotations (notes attached to highlighted text)
+    annotations: list = field(default_factory=list)
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -80,11 +118,16 @@ class SavedDocument:
             "spacing_between_paragraphs": self.spacing_between_paragraphs,
             "filing_date": self.filing_date,
             "pdf_filename": self.pdf_filename,
+            "annotations": [a.to_dict() if isinstance(a, Annotation) else a for a in self.annotations],
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "SavedDocument":
         """Create instance from dictionary."""
+        # Parse annotations from dict format
+        annotations_data = data.get("annotations", [])
+        annotations = [Annotation.from_dict(a) if isinstance(a, dict) else a for a in annotations_data]
+
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             name=data.get("name", "Untitled Document"),
@@ -101,6 +144,7 @@ class SavedDocument:
             spacing_between_paragraphs=data.get("spacing_between_paragraphs", 1),
             filing_date=data.get("filing_date", ""),
             pdf_filename=data.get("pdf_filename"),
+            annotations=annotations,
         )
 
     def update_modified(self):

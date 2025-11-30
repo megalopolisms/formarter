@@ -233,6 +233,213 @@ class LineBreakTextEdit(QTextEdit):
             super().insertFromMimeData(source)
 
 
+class AnnotationTextEdit(LineBreakTextEdit):
+    """
+    Extended text editor with PDF-style annotation support.
+
+    Features:
+    - Right-click context menu to add notes to selected text
+    - Yellow highlight rendering for annotated passages
+    - Click-to-navigate to annotation in notes panel
+    """
+
+    from PyQt6.QtCore import pyqtSignal
+
+    # Signal emitted when an annotation is added, edited, or deleted
+    annotation_changed = pyqtSignal()
+    # Signal emitted when user clicks on an annotated passage
+    annotation_clicked = pyqtSignal(str)  # annotation_id
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._annotations = []  # List of Annotation objects
+        self._updating_highlights = False
+
+        # Enable custom context menu
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
+
+        # Track cursor position changes to detect annotation clicks
+        self.cursorPositionChanged.connect(self._on_cursor_position_changed)
+
+    def set_annotations(self, annotations: list):
+        """Set annotations from loaded document."""
+        self._annotations = annotations
+        self._apply_highlights()
+
+    def get_annotations(self) -> list:
+        """Get current annotations."""
+        return self._annotations
+
+    def _show_context_menu(self, pos):
+        """Show context menu with Add Note option when text is selected."""
+        menu = self.createStandardContextMenu()
+        cursor = self.textCursor()
+
+        if cursor.hasSelection():
+            menu.addSeparator()
+            add_note_action = menu.addAction("Add Note...")
+            add_note_action.triggered.connect(self._add_note_for_selection)
+
+        # Check if cursor is in an annotated region
+        cursor_pos = cursor.position()
+        annotation_at_cursor = self._get_annotation_at_position(cursor_pos)
+        if annotation_at_cursor:
+            menu.addSeparator()
+            edit_note_action = menu.addAction("Edit Note...")
+            edit_note_action.triggered.connect(lambda: self._edit_annotation(annotation_at_cursor))
+            delete_note_action = menu.addAction("Delete Note")
+            delete_note_action.triggered.connect(lambda: self._delete_annotation(annotation_at_cursor))
+
+        menu.exec(self.mapToGlobal(pos))
+
+    def _add_note_for_selection(self):
+        """Add a note for the currently selected text."""
+        import uuid
+        from src.models.saved_document import Annotation
+
+        cursor = self.textCursor()
+        if not cursor.hasSelection():
+            return
+
+        selected_text = cursor.selectedText()
+        start_pos = cursor.selectionStart()
+        end_pos = cursor.selectionEnd()
+
+        # Show dialog to enter note
+        note, ok = QInputDialog.getMultiLineText(
+            self,
+            "Add Note",
+            f"Note for: \"{selected_text[:50]}{'...' if len(selected_text) > 50 else ''}\"",
+            ""
+        )
+
+        if ok and note.strip():
+            annotation = Annotation(
+                id=str(uuid.uuid4()),
+                start_pos=start_pos,
+                end_pos=end_pos,
+                highlighted_text=selected_text,
+                note=note.strip(),
+            )
+            self._annotations.append(annotation)
+            self._apply_highlights()
+            self.annotation_changed.emit()
+
+    def _edit_annotation(self, annotation):
+        """Edit an existing annotation."""
+        note, ok = QInputDialog.getMultiLineText(
+            self,
+            "Edit Note",
+            f"Note for: \"{annotation.highlighted_text[:50]}{'...' if len(annotation.highlighted_text) > 50 else ''}\"",
+            annotation.note
+        )
+
+        if ok:
+            annotation.note = note.strip()
+            self.annotation_changed.emit()
+
+    def _delete_annotation(self, annotation):
+        """Delete an annotation."""
+        reply = QMessageBox.question(
+            self,
+            "Delete Note",
+            f"Delete note for \"{annotation.highlighted_text[:50]}\"?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._annotations.remove(annotation)
+            self._apply_highlights()
+            self.annotation_changed.emit()
+
+    def _get_annotation_at_position(self, pos: int):
+        """Find annotation that contains the given cursor position."""
+        for annotation in self._annotations:
+            if annotation.start_pos <= pos <= annotation.end_pos:
+                return annotation
+        return None
+
+    def _on_cursor_position_changed(self):
+        """Check if cursor moved into an annotated region."""
+        cursor = self.textCursor()
+        pos = cursor.position()
+        annotation = self._get_annotation_at_position(pos)
+        if annotation:
+            self.annotation_clicked.emit(annotation.id)
+
+    def _apply_highlights(self):
+        """Apply yellow highlight to all annotated passages."""
+        if self._updating_highlights:
+            return
+
+        self._updating_highlights = True
+        try:
+            extra_selections = []
+            highlight_format = QTextCharFormat()
+            highlight_format.setBackground(QColor("#FFFF99"))  # Light yellow
+
+            for annotation in self._annotations:
+                cursor = QTextCursor(self.document())
+                cursor.setPosition(annotation.start_pos)
+                cursor.setPosition(annotation.end_pos, QTextCursor.MoveMode.KeepAnchor)
+
+                selection = QTextEdit.ExtraSelection()
+                selection.cursor = cursor
+                selection.format = highlight_format
+                extra_selections.append(selection)
+
+            self.setExtraSelections(extra_selections)
+        finally:
+            self._updating_highlights = False
+
+    def update_annotation_positions(self, old_text: str, new_text: str):
+        """
+        Update annotation positions after text changes.
+        This is called when text is edited to keep annotations aligned.
+        """
+        # Simple approach: find where text differs and adjust positions
+        # For now, just re-validate annotations - if highlighted text doesn't match, remove
+        valid_annotations = []
+        doc_text = self.toPlainText()
+
+        for annotation in self._annotations:
+            try:
+                # Check if the annotation's text still exists at the expected position
+                actual_text = doc_text[annotation.start_pos:annotation.end_pos]
+                if actual_text == annotation.highlighted_text:
+                    valid_annotations.append(annotation)
+                else:
+                    # Try to find the text nearby (within 100 chars)
+                    search_start = max(0, annotation.start_pos - 100)
+                    search_end = min(len(doc_text), annotation.end_pos + 100)
+                    search_region = doc_text[search_start:search_end]
+                    idx = search_region.find(annotation.highlighted_text)
+                    if idx != -1:
+                        # Found it - update positions
+                        annotation.start_pos = search_start + idx
+                        annotation.end_pos = annotation.start_pos + len(annotation.highlighted_text)
+                        valid_annotations.append(annotation)
+            except (IndexError, ValueError):
+                pass
+
+        if len(valid_annotations) != len(self._annotations):
+            self._annotations = valid_annotations
+            self.annotation_changed.emit()
+
+        self._apply_highlights()
+
+    def scroll_to_annotation(self, annotation_id: str):
+        """Scroll to and highlight a specific annotation."""
+        for annotation in self._annotations:
+            if annotation.id == annotation_id:
+                cursor = QTextCursor(self.document())
+                cursor.setPosition(annotation.start_pos)
+                cursor.setPosition(annotation.end_pos, QTextCursor.MoveMode.KeepAnchor)
+                self.setTextCursor(cursor)
+                self.ensureCursorVisible()
+                break
+
+
 class MainWindow(QMainWindow):
     """
     Main application window with three-panel layout:
@@ -5582,7 +5789,7 @@ PDF Generated: {output_path}
         return toolbar
 
     def _create_editor_panel(self) -> QWidget:
-        """Create the left panel with text editor."""
+        """Create the left panel with text editor and annotations panel."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -5592,25 +5799,119 @@ PDF Generated: {output_path}
         header.setStyleSheet("font-weight: bold; padding: 5px; background: #e8f4e8;")
         layout.addWidget(header)
 
-        # Text editor with Times New Roman font (custom class for <line> handling)
-        self.text_editor = LineBreakTextEdit()
+        # Create splitter to hold editor and annotations panel
+        editor_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Text editor with Times New Roman font (using AnnotationTextEdit for annotation support)
+        self.text_editor = AnnotationTextEdit()
         font = QFont("Times New Roman", 12)
         self.text_editor.setFont(font)
         self.text_editor.setPlaceholderText(
             "Type your document here...\n\n"
             "Press Enter to create a new paragraph.\n\n"
+            "Right-click text to add notes.\n"
             "Right-click paragraphs in Section Tree to assign sections."
         )
 
         # Connect text changed signal for real-time paragraph detection
         self.text_editor.textChanged.connect(self._on_text_changed)
 
+        # Connect annotation signals
+        self.text_editor.annotation_changed.connect(self._on_annotation_changed)
+        self.text_editor.annotation_clicked.connect(self._on_annotation_clicked)
+
         # Add syntax highlighting for section/subsection tags
         self._highlighter = SectionTagHighlighter(self.text_editor.document())
 
-        layout.addWidget(self.text_editor)
+        editor_splitter.addWidget(self.text_editor)
+
+        # Annotations panel (collapsible notes view)
+        annotations_widget = QWidget()
+        annotations_layout = QVBoxLayout(annotations_widget)
+        annotations_layout.setContentsMargins(0, 0, 0, 0)
+        annotations_layout.setSpacing(2)
+
+        # Annotations header with count
+        self.annotations_header = QLabel("Notes (0)")
+        self.annotations_header.setStyleSheet("font-weight: bold; padding: 3px; background: #fff8dc;")
+        annotations_layout.addWidget(self.annotations_header)
+
+        # Annotations list
+        self.annotations_list = QListWidget()
+        self.annotations_list.setAlternatingRowColors(True)
+        self.annotations_list.setStyleSheet("""
+            QListWidget {
+                font-size: 11px;
+                background: #fffef0;
+            }
+            QListWidget::item {
+                padding: 5px;
+                border-bottom: 1px solid #eee;
+            }
+            QListWidget::item:selected {
+                background: #fff3cd;
+            }
+        """)
+        self.annotations_list.itemClicked.connect(self._on_annotation_list_clicked)
+        self.annotations_list.itemDoubleClicked.connect(self._on_annotation_list_double_clicked)
+        annotations_layout.addWidget(self.annotations_list)
+
+        editor_splitter.addWidget(annotations_widget)
+
+        # Set initial splitter sizes (editor gets 75%, annotations get 25%)
+        editor_splitter.setSizes([600, 200])
+
+        layout.addWidget(editor_splitter)
 
         return panel
+
+    def _on_annotation_changed(self):
+        """Handle annotation changes - refresh the annotations list."""
+        self._refresh_annotations_list()
+
+    def _on_annotation_clicked(self, annotation_id: str):
+        """Handle click on annotated text - highlight in list."""
+        for i in range(self.annotations_list.count()):
+            item = self.annotations_list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == annotation_id:
+                self.annotations_list.setCurrentItem(item)
+                break
+
+    def _on_annotation_list_clicked(self, item):
+        """Handle click on annotation in list - scroll to text."""
+        annotation_id = item.data(Qt.ItemDataRole.UserRole)
+        if annotation_id:
+            self.text_editor.scroll_to_annotation(annotation_id)
+
+    def _on_annotation_list_double_clicked(self, item):
+        """Handle double-click on annotation - edit the note."""
+        annotation_id = item.data(Qt.ItemDataRole.UserRole)
+        if annotation_id:
+            for annotation in self.text_editor.get_annotations():
+                if annotation.id == annotation_id:
+                    self.text_editor._edit_annotation(annotation)
+                    break
+
+    def _refresh_annotations_list(self):
+        """Refresh the annotations list widget."""
+        self.annotations_list.clear()
+        annotations = self.text_editor.get_annotations()
+        self.annotations_header.setText(f"Notes ({len(annotations)})")
+
+        for annotation in annotations:
+            # Create display text: highlighted text snippet + note preview
+            text_preview = annotation.highlighted_text[:40]
+            if len(annotation.highlighted_text) > 40:
+                text_preview += "..."
+            note_preview = annotation.note[:60]
+            if len(annotation.note) > 60:
+                note_preview += "..."
+
+            item_text = f'"{text_preview}"\n  -> {note_preview}'
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.ItemDataRole.UserRole, annotation.id)
+            item.setToolTip(f"Text: {annotation.highlighted_text}\n\nNote: {annotation.note}")
+            self.annotations_list.addItem(item)
 
     def _create_section_tree_panel(self) -> QWidget:
         """Create the middle panel with section tree."""
@@ -6354,6 +6655,9 @@ PDF Generated: {output_path}
                 }
             doc.sections.append(section_data)
 
+        # Save annotations
+        doc.annotations = self.text_editor.get_annotations()
+
     def _load_doc_to_editor(self, doc: SavedDocument):
         """Load a SavedDocument into the editor."""
         self._updating = True
@@ -6396,6 +6700,10 @@ PDF Generated: {output_path}
                         between_paragraphs=cs["between_paragraphs"],
                     )
                 self._section_starts[section_data["start_para"]] = section
+
+            # Load annotations
+            self.text_editor.set_annotations(doc.annotations)
+            self._refresh_annotations_list()
 
             # Update current document reference
             self._current_saved_doc = doc
