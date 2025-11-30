@@ -8100,7 +8100,11 @@ PDF Generated: {output_path}
             if sys.platform == "darwin":
                 # Close any existing Preview windows showing our preview file
                 subprocess.run(["pkill", "-x", "Preview"], capture_output=True)
-                subprocess.run(["open", str(preview_path)], check=True)
+                # Small delay to ensure Preview has closed before reopening
+                import time
+                time.sleep(0.5)
+                # Use explicit path to Preview.app to avoid error -600
+                subprocess.run(["/usr/bin/open", "-a", "Preview", str(preview_path)], check=True)
             elif sys.platform == "win32":
                 subprocess.run(["start", "", str(preview_path)], shell=True, check=True)
             else:
