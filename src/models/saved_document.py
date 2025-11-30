@@ -44,6 +44,9 @@ class SavedDocument:
     # Case profile (index in CASE_PROFILES list, 0 = none selected)
     case_profile_index: int = 1  # Default to case 178
 
+    # Case ID for cross-referencing with lawsuits.json (e.g., "178", "233", "254")
+    case_id: Optional[str] = None
+
     # Document type (index in doc type dropdown)
     document_type_index: int = 1  # Default to MOTION
     custom_title: str = ""  # If document type is CUSTOM
@@ -69,6 +72,7 @@ class SavedDocument:
             "text_content": self.text_content,
             "sections": self.sections,
             "case_profile_index": self.case_profile_index,
+            "case_id": self.case_id,
             "document_type_index": self.document_type_index,
             "custom_title": self.custom_title,
             "spacing_before_section": self.spacing_before_section,
@@ -89,6 +93,7 @@ class SavedDocument:
             text_content=data.get("text_content", ""),
             sections=data.get("sections", []),
             case_profile_index=data.get("case_profile_index", 1),
+            case_id=data.get("case_id"),
             document_type_index=data.get("document_type_index", 1),
             custom_title=data.get("custom_title", ""),
             spacing_before_section=data.get("spacing_before_section", 1),

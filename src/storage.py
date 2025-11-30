@@ -309,6 +309,7 @@ class DocumentStorage:
             text_content=original.text_content,
             sections=original.sections.copy(),
             case_profile_index=original.case_profile_index,
+            case_id=original.case_id,
             document_type_index=original.document_type_index,
             custom_title=original.custom_title,
             spacing_before_section=original.spacing_before_section,
