@@ -4753,10 +4753,42 @@ class MainWindow(QMainWindow):
             folder.mkdir(parents=True, exist_ok=True)
             return
 
-        # Filter PDFs by case ID prefix
-        for pdf_path in sorted(folder.glob(f"{case_id}*.pdf")):
-            item = QListWidgetItem(pdf_path.stem)
-            item.setData(Qt.ItemDataRole.UserRole, str(pdf_path))
+        # Collect all filings (PDFs and TXTs) including from subfolders
+        filings = []
+
+        # Get PDFs directly in folder
+        for pdf_path in folder.glob(f"{case_id}*.pdf"):
+            filings.append(('pdf', pdf_path))
+
+        # Get PDFs from subfolders
+        for pdf_path in folder.glob(f"**/{case_id}*.pdf"):
+            if pdf_path.parent != folder:  # Avoid duplicates
+                filings.append(('pdf', pdf_path))
+
+        # Get TXT files directly in folder (without PDF counterpart)
+        for txt_path in folder.glob(f"{case_id}*.txt"):
+            pdf_counterpart = txt_path.with_suffix('.pdf')
+            if not pdf_counterpart.exists():
+                filings.append(('txt', txt_path))
+
+        # Get TXT files from subfolders (without PDF counterpart)
+        for txt_path in folder.glob(f"**/{case_id}*.txt"):
+            if txt_path.parent != folder:
+                pdf_counterpart = txt_path.with_suffix('.pdf')
+                if not pdf_counterpart.exists():
+                    filings.append(('txt', txt_path))
+
+        # Sort by filename and add to list
+        for file_type, file_path in sorted(filings, key=lambda x: x[1].name):
+            # Show folder prefix for subfolder items
+            if file_path.parent != folder:
+                display_name = f"[{file_path.parent.name}] {file_path.stem}"
+            else:
+                display_name = file_path.stem
+
+            item = QListWidgetItem(display_name)
+            item.setData(Qt.ItemDataRole.UserRole, str(file_path))
+            item.setData(Qt.ItemDataRole.UserRole + 2, file_type)  # Store file type
             widget.filings_list.addItem(item)
 
         # Auto-select first
@@ -4774,8 +4806,14 @@ class MainWindow(QMainWindow):
         if not widget or not item:
             return
 
-        pdf_path = Path(item.data(Qt.ItemDataRole.UserRole))
-        txt_path = pdf_path.with_suffix('.txt')
+        file_path = Path(item.data(Qt.ItemDataRole.UserRole))
+        file_type = item.data(Qt.ItemDataRole.UserRole + 2)  # 'pdf' or 'txt'
+
+        # Determine txt path based on file type
+        if file_type == 'txt' or file_path.suffix.lower() == '.txt':
+            txt_path = file_path
+        else:
+            txt_path = file_path.with_suffix('.txt')
 
         if not txt_path.exists():
             widget.filing_content.setPlainText("No text file. Extract text from PDF first.")
