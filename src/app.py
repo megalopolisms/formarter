@@ -285,6 +285,12 @@ class AnnotationTextEdit(LineBreakTextEdit):
         """Get all unlinked (standalone) annotations."""
         return [a for a in self._annotations if a.paragraph_number is None]
 
+    def clear_annotations(self):
+        """Clear all annotations."""
+        self._annotations = []
+        self._paragraph_boundaries = []
+        self.setExtraSelections([])  # Clear highlights
+
     def update_paragraph_boundaries(self, boundaries: list):
         """
         Update paragraph boundary information.
@@ -331,34 +337,6 @@ class AnnotationTextEdit(LineBreakTextEdit):
             cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
             self.setTextCursor(cursor)
             self.ensureCursorVisible()
-
-    def sync_annotations_with_paragraphs(self, current_paragraphs: list):
-        """
-        Sync annotations with current paragraph list.
-        - Updates paragraph_preview for linked notes
-        - Unlinks notes whose paragraphs no longer exist
-        current_paragraphs: list of paragraph text strings (0-indexed)
-        """
-        total_paras = len(current_paragraphs)
-        changed = False
-
-        for annotation in self._annotations:
-            if annotation.paragraph_number is not None:
-                if annotation.paragraph_number > total_paras:
-                    # Paragraph was deleted - unlink the note
-                    annotation.unlink()
-                    changed = True
-                else:
-                    # Update the preview
-                    para_text = current_paragraphs[annotation.paragraph_number - 1]
-                    new_preview = para_text[:50] + ("..." if len(para_text) > 50 else "")
-                    if annotation.paragraph_preview != new_preview:
-                        annotation.paragraph_preview = new_preview
-                        changed = True
-
-        if changed:
-            self.annotations_need_sync.emit()
-
 
 class MainWindow(QMainWindow):
     """
@@ -6657,6 +6635,8 @@ PDF Generated: {output_path}
         self._updating = True
         try:
             self.text_editor.clear()
+            self.text_editor.clear_annotations()  # Clear annotations for new doc
+            self._refresh_annotations_list()  # Update UI
             self._section_starts.clear()
             self.document = Document(title="New Document")
 
@@ -7209,6 +7189,25 @@ PDF Generated: {output_path}
 
         # Update text editor with boundaries for highlighting
         self.text_editor.update_paragraph_boundaries(paragraph_boundaries)
+
+        # Sync annotations - unlink notes for deleted paragraphs
+        total_paragraphs = len(paragraph_boundaries)
+        changed = False
+        for annotation in self.text_editor.get_annotations():
+            if annotation.is_linked and annotation.paragraph_number > total_paragraphs:
+                annotation.unlink()
+                changed = True
+            elif annotation.is_linked and annotation.paragraph_number in self.document.paragraphs:
+                # Update preview text
+                para_text = self.document.paragraphs[annotation.paragraph_number].text
+                new_preview = para_text[:50] + ("..." if len(para_text) > 50 else "")
+                if annotation.paragraph_preview != new_preview:
+                    annotation.paragraph_preview = new_preview
+                    changed = True
+
+        if changed:
+            self._refresh_annotations_list()
+
         self._update_paragraph_highlights()
 
     def _calculate_pages(self):
@@ -7490,9 +7489,9 @@ PDF Generated: {output_path}
             if notes_for_para:
                 notes_label = f"Notes ({len(notes_for_para)})"
                 view_notes_action = menu.addAction(notes_label)
-                view_notes_action.triggered.connect(lambda: self._show_notes_for_paragraph(para_num))
+                view_notes_action.triggered.connect(lambda checked=False, p=para_num: self._show_notes_for_paragraph(p))
             add_note_action = menu.addAction("Add Note...")
-            add_note_action.triggered.connect(lambda p=para_num: self._add_note_for_paragraph(p))
+            add_note_action.triggered.connect(lambda checked=False, p=para_num: self._add_note_for_paragraph(p))
 
         elif item_type == "section":
             section_start_para = item_id
