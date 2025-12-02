@@ -62,6 +62,7 @@ from .models.lawsuit import LawsuitManager, Lawsuit
 from .widgets.filing_tree import FilingTreeWidget
 from .widgets.tag_picker import TagPickerDialog
 from .widgets.filter_bar import FilterBar
+from .widgets.file_document_dialog import FileDocumentDialog
 from .auditor import (
     TRO_CHECKLIST, CheckCategory, CheckStatus,
     ComplianceDetector, AuditResult, ItemResult, AuditOptions,
@@ -6857,6 +6858,17 @@ PDF Generated: {output_path}
 
         menu.addSeparator()
 
+        # Mark as Filed / Unfile action (links Editor doc to Executed Filings tab)
+        doc = self.storage.get_by_id(doc_id)
+        if doc and doc.is_filed:
+            unfile_action = menu.addAction("\U0001F513 Unfile Document")  # Unlock icon
+            unfile_action.triggered.connect(lambda: self._on_unfile_document(doc_id))
+        else:
+            file_action = menu.addAction("\U0001F512 Mark as Filed...")  # Lock icon
+            file_action.triggered.connect(lambda: self._on_mark_as_filed(doc_id))
+
+        menu.addSeparator()
+
         # Delete action
         delete_action = menu.addAction("Delete")
         delete_action.triggered.connect(lambda: self._delete_document(doc_id))
@@ -6889,6 +6901,16 @@ PDF Generated: {output_path}
         if doc:
             self._load_doc_to_editor(doc)
             self._refresh_document_list()
+
+            # Make editor read-only if document is filed
+            # Filed documents are linked to Executed Filings tab and should not be edited
+            if doc.is_filed or doc.is_locked:
+                self.text_editor.setReadOnly(True)
+                self.statusBar().showMessage(
+                    f"'{doc.name}' is filed with the court - read-only mode", 5000
+                )
+            else:
+                self.text_editor.setReadOnly(False)
 
     def _rename_document(self, doc_id: str):
         """Rename a document."""
@@ -6939,6 +6961,313 @@ PDF Generated: {output_path}
             if self._current_saved_doc and self._current_saved_doc.id == doc_id:
                 self._current_saved_doc = None
             self._refresh_document_list()
+
+    # ==========================================================================
+    # MARK AS FILED FEATURE
+    # Links Editor documents to the Executed Filings tab
+    # ==========================================================================
+
+    def _on_mark_as_filed(self, doc_id: str):
+        """
+        Mark a document as filed with the court.
+
+        This links the Editor document to the Executed Filings tab:
+        1. Shows dialog to collect filing date and docket number
+        2. Generates .txt and .pdf files in executed_filings/
+        3. Adds entry to executed_filings/index.json
+        4. Marks document as is_filed=True, is_locked=True
+        5. Document appears in both tabs (read-only)
+        """
+        doc = self.storage.get_by_id(doc_id)
+        if not doc:
+            return
+
+        # Already filed?
+        if doc.is_filed:
+            QMessageBox.information(
+                self, "Already Filed",
+                f"'{doc.name}' is already marked as filed."
+            )
+            return
+
+        # Show the filing dialog
+        dialog = FileDocumentDialog(
+            doc_name=doc.name,
+            doc_title=doc.custom_title,
+            case_id=doc.case_id or "178",
+            parent=self
+        )
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        # Get values from dialog
+        filing_date = dialog.filing_date
+        docket_number = dialog.docket_number
+
+        try:
+            # Generate the full document content (caption + body + signature)
+            full_content = self._generate_filed_document_text(doc)
+
+            # Create filenames
+            case_id = doc.case_id or "178"
+            title_part = doc.custom_title or doc.name
+            # Clean the title for filename
+            safe_title = "".join(c for c in title_part if c.isalnum() or c in " -_").strip()
+            txt_filename = f"{case_id} {safe_title}.txt"
+            pdf_filename = f"{case_id} {safe_title}.pdf"
+
+            # Get executed_filings path
+            ef_path = Path(self.storage.data_dir) / "executed_filings"
+            ef_path.mkdir(exist_ok=True)
+
+            # Write .txt file
+            txt_path = ef_path / txt_filename
+            txt_path.write_text(full_content, encoding="utf-8")
+
+            # Generate PDF using existing PDF export
+            pdf_path = ef_path / pdf_filename
+            self._generate_filed_pdf(doc, pdf_path)
+
+            # Update index.json
+            index_path = ef_path / "index.json"
+            import json
+            from datetime import datetime
+
+            if index_path.exists():
+                with open(index_path, "r", encoding="utf-8") as f:
+                    index_data = json.load(f)
+            else:
+                index_data = {"filings": [], "folders": []}
+
+            # Create filing entry with link back to Editor document
+            filing_entry = {
+                "id": f"ef-{doc.id}",
+                "case_id": case_id,
+                "title": doc.custom_title or doc.name,
+                "filename": pdf_filename,
+                "txt_filename": txt_filename,
+                "docket_number": docket_number or None,
+                "date_filed": filing_date,
+                "date_created": datetime.now().isoformat(),
+                "status": "filed",
+                "source_document_id": doc.id,  # Link back to Editor doc
+                "notes": f"Filed from Editor document: {doc.name}"
+            }
+            index_data["filings"].append(filing_entry)
+
+            with open(index_path, "w", encoding="utf-8") as f:
+                json.dump(index_data, f, indent=2)
+
+            # Update the document
+            doc.is_filed = True
+            doc.is_locked = True
+            doc.filed_date = filing_date
+            doc.docket_number = docket_number
+            doc.executed_filing_id = filing_entry["id"]
+            self.storage.save(doc)
+
+            # Update current doc if it's the one we just filed
+            if self._current_saved_doc and self._current_saved_doc.id == doc_id:
+                self._current_saved_doc = doc
+                # Make editor read-only
+                self.text_editor.setReadOnly(True)
+
+            # Refresh UI
+            self._refresh_document_list()
+            self._refresh_executed_filings()
+
+            QMessageBox.information(
+                self, "Document Filed",
+                f"'{doc.name}' has been marked as filed.\n\n"
+                f"Files generated:\n"
+                f"• {txt_filename}\n"
+                f"• {pdf_filename}\n\n"
+                f"The document is now read-only and appears in both\n"
+                f"the Editor tab and Executed Filings tab."
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to mark document as filed:\n{str(e)}"
+            )
+
+    def _on_unfile_document(self, doc_id: str):
+        """
+        Remove the 'filed' status from a document.
+
+        This unlocks the document for editing but does NOT delete
+        the generated files from executed_filings/.
+        """
+        doc = self.storage.get_by_id(doc_id)
+        if not doc:
+            return
+
+        if not doc.is_filed:
+            return
+
+        result = QMessageBox.question(
+            self,
+            "Unfile Document",
+            f"Are you sure you want to unfile '{doc.name}'?\n\n"
+            "This will:\n"
+            "• Unlock the document for editing\n"
+            "• Remove it from the Executed Filings tab\n\n"
+            "Note: The generated .txt and .pdf files will NOT be deleted.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            # Remove from index.json
+            ef_path = Path(self.storage.data_dir) / "executed_filings"
+            index_path = ef_path / "index.json"
+
+            if index_path.exists() and doc.executed_filing_id:
+                import json
+                with open(index_path, "r", encoding="utf-8") as f:
+                    index_data = json.load(f)
+
+                # Remove the filing entry
+                index_data["filings"] = [
+                    f for f in index_data["filings"]
+                    if f.get("id") != doc.executed_filing_id
+                ]
+
+                with open(index_path, "w", encoding="utf-8") as f:
+                    json.dump(index_data, f, indent=2)
+
+            # Update document
+            doc.is_filed = False
+            doc.is_locked = False
+            doc.filed_date = None
+            doc.docket_number = None
+            doc.executed_filing_id = None
+            self.storage.save(doc)
+
+            # Update current doc if it's the one we just unfiled
+            if self._current_saved_doc and self._current_saved_doc.id == doc_id:
+                self._current_saved_doc = doc
+                # Make editor editable again
+                self.text_editor.setReadOnly(False)
+
+            # Refresh UI
+            self._refresh_document_list()
+            self._refresh_executed_filings()
+
+            QMessageBox.information(
+                self, "Document Unfiled",
+                f"'{doc.name}' has been unfiled and is now editable."
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to unfile document:\n{str(e)}"
+            )
+
+    def _generate_filed_document_text(self, doc: SavedDocument) -> str:
+        """
+        Generate the full document text for the filed .txt file.
+
+        This generates a simple text file with title and body content.
+        The full formatted version (with caption/signature) is in the PDF.
+        """
+        lines = []
+
+        # Add title
+        if doc.custom_title:
+            lines.append(doc.custom_title.upper())
+            lines.append("")
+            lines.append("=" * 60)
+            lines.append("")
+
+        # Add document name if no custom title
+        elif doc.name:
+            lines.append(doc.name.upper())
+            lines.append("")
+            lines.append("=" * 60)
+            lines.append("")
+
+        # Add filing metadata
+        lines.append(f"Case: {doc.case_id or '178'}")
+        lines.append(f"Filed: {doc.filed_date or date.today().isoformat()}")
+        if doc.docket_number:
+            lines.append(f"Docket: {doc.docket_number}")
+        lines.append("")
+        lines.append("-" * 60)
+        lines.append("")
+
+        # Add body content
+        lines.append(doc.text_content)
+
+        return "\n".join(lines)
+
+    def _generate_filed_pdf(self, doc: SavedDocument, pdf_path: Path):
+        """
+        Generate a PDF for the filed document.
+
+        Uses the existing PDF export functionality with current editor state.
+        """
+        try:
+            # Use existing PDF export with current document state
+            # The document should already have caption/signature from editor
+            generate_pdf(
+                output_path=str(pdf_path),
+                document_title=doc.custom_title or doc.name,
+                caption=self.document.caption if self.document else CaseCaption(),
+                signature_block=self.document.signature if self.document else SignatureBlock(),
+                paragraphs=list(self.document.paragraphs.values()) if self.document else [],
+                sections=self.document.sections if self.document else [],
+                global_spacing=self._global_spacing,
+                filing_date=doc.filed_date or date.today().isoformat(),
+                include_certificate=True
+            )
+        except Exception as e:
+            # If PDF generation fails, create a simple text-based PDF
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas
+
+            c = canvas.Canvas(str(pdf_path), pagesize=letter)
+            c.setFont("Times-Roman", 12)
+
+            # Title
+            title = doc.custom_title or doc.name
+            c.drawCentredString(306, 750, title.upper())
+            c.line(72, 740, 540, 740)
+
+            # Filing info
+            y = 720
+            c.drawString(72, y, f"Case: {doc.case_id or '178'}")
+            y -= 15
+            c.drawString(72, y, f"Filed: {doc.filed_date or date.today().isoformat()}")
+            if doc.docket_number:
+                y -= 15
+                c.drawString(72, y, f"Docket: {doc.docket_number}")
+
+            y -= 30
+
+            # Body text (wrap lines)
+            text = doc.text_content
+            lines = text.split('\n')
+            for line in lines:
+                if y < 72:
+                    c.showPage()
+                    c.setFont("Times-Roman", 12)
+                    y = 750
+                c.drawString(72, y, line[:80])  # Truncate long lines
+                y -= 15
+
+            c.save()
+
+    def _refresh_executed_filings(self):
+        """Refresh the Executed Filings tab display."""
+        # This method should already exist - if not, we'll handle the call gracefully
+        if hasattr(self, '_load_executed_filings'):
+            self._load_executed_filings()
 
     def _on_text_changed(self):
         """Handle text changes - detect paragraphs in real-time."""

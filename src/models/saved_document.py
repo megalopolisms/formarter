@@ -75,6 +75,37 @@ class SavedDocument:
 
     Includes text content, sections, case profile, document type,
     spacing settings, and metadata (dates, PDF path).
+
+    IMPORTANT: Tab Architecture - Editor vs Executed Filings
+    =========================================================
+    The Editor tab and Executed Filings tab are RELATED but NOT CONNECTED systems:
+
+    EDITOR TAB (Draft Documents):
+    - Uses documents.json for storage
+    - Documents are editable drafts
+    - text_content contains ONLY the body (no caption, no signature)
+    - PDF export auto-generates caption/title/signature from templates
+
+    EXECUTED FILINGS TAB (Court-Submitted Documents):
+    - Uses executed_filings/index.json + *.txt files for storage
+    - Documents that have been ACTUALLY FILED with the court
+    - Contains complete documents (caption + body + signature)
+    - Read-only archive of filed documents
+
+    WORKFLOW:
+    1. Draft in Editor tab → Preview PDF → Export PDF
+    2. File document with court (outside app)
+    3. Use "Mark as Filed" to link Editor doc to Executed Filings
+       - Sets is_filed=True, is_locked=True
+       - Generates .txt and .pdf in executed_filings/
+       - Document appears in BOTH tabs (read-only)
+
+    The new "filed" fields below enable this linking:
+    - is_filed: True when document has been submitted to court
+    - is_locked: True to prevent editing of filed documents
+    - filed_date: Date document was filed with court
+    - docket_number: Court docket/document number
+    - executed_filing_id: Links to executed_filings/index.json entry
     """
     # Unique identifier
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -116,6 +147,13 @@ class SavedDocument:
     # Annotations (notes attached to highlighted text)
     annotations: list = field(default_factory=list)
 
+    # Filed document state (for linking to Executed Filings tab)
+    is_filed: bool = False
+    is_locked: bool = False
+    filed_date: Optional[str] = None
+    docket_number: Optional[str] = None
+    executed_filing_id: Optional[str] = None  # Link to index.json entry
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -135,6 +173,11 @@ class SavedDocument:
             "filing_date": self.filing_date,
             "pdf_filename": self.pdf_filename,
             "annotations": [a.to_dict() if isinstance(a, Annotation) else a for a in self.annotations],
+            "is_filed": self.is_filed,
+            "is_locked": self.is_locked,
+            "filed_date": self.filed_date,
+            "docket_number": self.docket_number,
+            "executed_filing_id": self.executed_filing_id,
         }
 
     @classmethod
@@ -161,6 +204,12 @@ class SavedDocument:
             filing_date=data.get("filing_date", ""),
             pdf_filename=data.get("pdf_filename"),
             annotations=annotations,
+            # Filed document state
+            is_filed=data.get("is_filed", False),
+            is_locked=data.get("is_locked", False),
+            filed_date=data.get("filed_date"),
+            docket_number=data.get("docket_number"),
+            executed_filing_id=data.get("executed_filing_id"),
         )
 
     def update_modified(self):

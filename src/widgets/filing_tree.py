@@ -73,6 +73,10 @@ class FilingTreeWidget(QTreeWidget):
     case_context_menu = pyqtSignal(str, object)  # case_id, QPoint
     document_moved = pyqtSignal(str, str, str)  # doc_id, old_filing_id, new_filing_id
 
+    # Signals for Mark as Filed feature (links Editor doc to Executed Filings tab)
+    mark_as_filed = pyqtSignal(str)    # doc_id - emitted when user clicks "Mark as Filed"
+    unfile_document = pyqtSignal(str)  # doc_id - emitted when user clicks "Unfile Document"
+
     # Item types stored in UserRole
     ITEM_TYPE_CASE = "case"
     ITEM_TYPE_FILING = "filing"
@@ -193,7 +197,16 @@ class FilingTreeWidget(QTreeWidget):
                     if doc:
                         doc_item = QTreeWidgetItem(filing_item)
                         doc_name = doc.get("name", doc_id) if isinstance(doc, dict) else getattr(doc, "name", doc_id)
-                        doc_item.setText(0, f"\U0001F4C4 {doc_name}")  # Page icon
+
+                        # Check if document is filed (linked to Executed Filings tab)
+                        is_filed = doc.get("is_filed", False) if isinstance(doc, dict) else getattr(doc, "is_filed", False)
+                        if is_filed:
+                            # Filed documents show lock icon and "(Filed)" badge
+                            doc_item.setText(0, f"\U0001F512 {doc_name} (Filed)")  # Lock icon
+                            doc_item.setForeground(0, QBrush(QColor("#2e7d32")))  # Green text
+                            doc_item.setToolTip(0, "Filed with court - read-only")
+                        else:
+                            doc_item.setText(0, f"\U0001F4C4 {doc_name}")  # Page icon
                         doc_item.setData(0, Qt.ItemDataRole.UserRole, (self.ITEM_TYPE_DOCUMENT, doc_id))
 
                 # Add exhibit files
