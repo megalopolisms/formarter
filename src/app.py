@@ -7171,37 +7171,21 @@ PDF Generated: {output_path}
 
     def _generate_filed_document_text(self, doc: SavedDocument) -> str:
         """
-        Generate the full document text for the filed .txt file.
+        Generate text for the filed .txt file.
 
-        This generates a simple text file with title and body content.
-        The full formatted version (with caption/signature) is in the PDF.
+        NO title/header - the PDF handles that via _build_caption().
+        YES to minimal metadata (case, date, docket) for reference.
         """
         lines = []
 
-        # Add title
-        if doc.custom_title:
-            lines.append(doc.custom_title.upper())
-            lines.append("")
-            lines.append("=" * 60)
-            lines.append("")
-
-        # Add document name if no custom title
-        elif doc.name:
-            lines.append(doc.name.upper())
-            lines.append("")
-            lines.append("=" * 60)
-            lines.append("")
-
-        # Add filing metadata
+        # Metadata header (simple, no title)
         lines.append(f"Case: {doc.case_id or '178'}")
         lines.append(f"Filed: {doc.filed_date or date.today().isoformat()}")
         if doc.docket_number:
             lines.append(f"Docket: {doc.docket_number}")
         lines.append("")
-        lines.append("-" * 60)
-        lines.append("")
 
-        # Add body content
+        # Body content
         lines.append(doc.text_content)
 
         return "\n".join(lines)
@@ -7228,19 +7212,15 @@ PDF Generated: {output_path}
             )
         except Exception as e:
             # If PDF generation fails, create a simple text-based PDF
+            # NO title/separator - just metadata + body (per user request)
             from reportlab.lib.pagesizes import letter
             from reportlab.pdfgen import canvas
 
             c = canvas.Canvas(str(pdf_path), pagesize=letter)
             c.setFont("Times-Roman", 12)
 
-            # Title
-            title = doc.custom_title or doc.name
-            c.drawCentredString(306, 750, title.upper())
-            c.line(72, 740, 540, 740)
-
-            # Filing info
-            y = 720
+            # Metadata only (no title/separator)
+            y = 750
             c.drawString(72, y, f"Case: {doc.case_id or '178'}")
             y -= 15
             c.drawString(72, y, f"Filed: {doc.filed_date or date.today().isoformat()}")
